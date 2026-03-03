@@ -23,4 +23,5 @@ struct SynthModel
     copula::Any                   # fitted BetaCopula, or Nothing
     copula_columns::Vector{Symbol}
     nrows_original::Int
+    scrambled::Vector{Symbol}     # columns whose sampled values are character-scrambled
 end

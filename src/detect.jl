@@ -12,23 +12,19 @@ Classify a DataFrame column into one of:
 """
 function detect_column_type(col)
     nm = _nonmissing(col)
+    return _detect_column_type(nm, _basetype(col))
+end
 
-    # Entirely missing → constant
+# Internal version — accepts pre-collected non-missing values and base type
+# so fit() can pass the nm it already collected instead of re-scanning the column.
+function _detect_column_type(nm::Vector, T::Type)
     isempty(nm) && return :constant
 
     n_unique = length(unique(nm))
-
-    # Priority 1: single unique value
     n_unique == 1 && return :constant
-
-    # Priority 2: exactly two unique values (regardless of type)
     n_unique == 2 && return :binary
 
-    # Priority 3: type-based for 3+ unique values
-    T = _basetype(col)
-
     if T <: AbstractFloat
-        # Integer-valued floats → integer
         all(x -> x == floor(x), nm) && return :integer
         return :continuous
     end

@@ -148,4 +148,46 @@ using Test
         @test nrow(syn) == 30
     end
 
+    # ── scramble: character/digit scrambling of sensitive columns ─────────────
+    @testset "scramble" begin
+        n   = 200
+        df  = DataFrame(
+            id     = [string(i) * "-ABC" for i in 1:n],   # string identifier
+            code   = rand(10000:99999, n),                  # integer identifier
+            amount = randn(n),                              # normal numeric col
+        )
+        original_ids   = Set(df.id)
+        original_codes = Set(df.code)
+
+        model = fit(df; scramble=[:id, :code])
+        @test model.scrambled == [:id, :code]
+
+        syn = sample(model, 300)
+
+        # Column is still present and has the right length
+        @test :id   in Symbol.(names(syn))
+        @test :code in Symbol.(names(syn))
+        @test nrow(syn) == 300
+
+        # Shuffled strings have the same length as the originals but are
+        # (with overwhelming probability) not verbatim original values.
+        @test all(v -> length(v) == length(first(df.id)), syn.id)
+        @test !all(v -> v in original_ids, syn.id)
+
+        # Shuffled integers have digits rearranged — very unlikely to all
+        # match originals for a 300-row sample from a 200-row source.
+        @test !all(v -> v in original_codes, syn.code)
+
+        # Non-scrambled column is unaffected
+        @test eltype(syn.amount) == Float64
+
+        # Error on unknown column
+        @test_throws ErrorException fit(df; scramble=[:nonexistent])
+
+        # synthesize convenience wrapper also accepts scramble
+        syn2 = synthesize(df, 50; scramble=[:id])
+        @test :id in Symbol.(names(syn2))
+        @test nrow(syn2) == 50
+    end
+
 end

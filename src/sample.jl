@@ -1,12 +1,25 @@
 using DataFrames
 using StatsBase
+using Random
 
 # ─── Inverse-CDF helpers ──────────────────────────────────────────────────────
 
+# Direct O(1) quantile from a pre-sorted vector using linear interpolation.
+# This avoids the copy + partialsort! overhead that Statistics.quantile() incurs
+# on every call when passed an unsorted (or unknown-sorted) vector.
+@inline function _quantile_sorted(sv::Vector{Float64}, u::Float64)
+    n    = length(sv)
+    idx  = u * (n - 1)           # 0-based float position in sv
+    lo   = floor(Int, idx) + 1   # 1-based lower index
+    hi   = min(lo + 1, n)        # 1-based upper index (clamped at last element)
+    frac = idx - (lo - 1)        # interpolation weight ∈ [0, 1)
+    return sv[lo] + frac * (sv[hi] - sv[lo])
+end
+
 # Map a vector of uniform [0,1] values through the empirical quantile function.
 function _invert_empirical(m::EmpiricalMarginal, u_vec::AbstractVector{Float64})
-    # quantile() on a sorted vector uses linear interpolation.
-    return [quantile(m.sorted_values, clamp(u, 0.0, 1.0)) for u in u_vec]
+    sv = m.sorted_values
+    return [_quantile_sorted(sv, clamp(u, 0.0, 1.0)) for u in u_vec]
 end
 
 # Convert raw Float64 quantile output to the column's original eltype.
@@ -25,6 +38,30 @@ end
 function _sample_categorical(m::CategoricalMarginal, n::Int)
     return StatsBase.sample(m.levels, Weights(m.probs), n)
 end
+
+# ─── Scramble helpers ─────────────────────────────────────────────────────────
+
+# Scramble all characters of a string so the result is unrecognisable.
+_scramble_value(v::AbstractString) = String(Random.shuffle(collect(v)))
+
+# Scramble the decimal digits of an integer so the result is unrecognisable.
+# Leading zeros produced by the scramble are dropped by parse(), which may
+# reduce the magnitude (e.g. 10000 → "00001" → 1). This is intentional:
+# the goal is to prevent the output from being a real identifier, not to
+# preserve the exact range.
+function _scramble_value(v::T) where T <: Integer
+    digs     = collect(string(abs(v)))
+    Random.shuffle!(digs)
+    scrambled = parse(Int64, String(digs))
+    return T(v < 0 ? -scrambled : scrambled)
+end
+
+# Fallback: other types (Float64, Bool, etc.) are passed through unchanged.
+# fit() already warns when a scrambled column has one of these types.
+_scramble_value(v) = v
+
+# Apply scramble element-wise to a sampled column vector.
+_apply_scramble(col::Vector) = [_scramble_value(v) for v in col]
 
 # ─── Main sample function ─────────────────────────────────────────────────────
 
@@ -45,17 +82,21 @@ function sample(model::SynthModel, nrows::Int)
     col_types = model.column_types
     result    = Dict{Symbol, Vector}()
 
+    # Precompute name → index lookup to avoid O(ncols) findfirst per copula column.
+    name_to_idx = Dict(n => i for (i, n) in enumerate(col_names))
+
     # ── Step 1–3: copula-based sampling of numeric columns ───────────────────
     if !isnothing(model.copula) && length(model.copula_columns) >= 2
-        # rand returns (d × nrows): each row is one variable, each column one obs.
-        U_mat = rand(model.copula, nrows)   # (d, nrows)
+        # rand returns (d × nrows) in column-major layout. Transposing to (nrows × d)
+        # once means each per-column slice U_T[:, j] is contiguous in memory,
+        # avoiding the cache-unfriendly row reads of U_mat[j, :].
+        U_T = Matrix(rand(model.copula, nrows)')   # (nrows × d)
 
         for (j, cname) in enumerate(model.copula_columns)
-            idx    = findfirst(==(cname), col_names)
-            ctype  = col_types[idx]
-            m      = model.marginals[cname]::EmpiricalMarginal
-            u_vec  = U_mat[j, :]            # nrows uniform values for this column
-            vals   = _invert_empirical(m, u_vec)
+            ctype = col_types[name_to_idx[cname]]
+            m     = model.marginals[cname]::EmpiricalMarginal
+            u_vec = U_T[:, j]                      # contiguous column slice
+            vals  = _invert_empirical(m, u_vec)
             result[cname] = _cast_numeric(vals, ctype, m.original_eltype)
         end
     else
@@ -82,6 +123,12 @@ function sample(model::SynthModel, nrows::Int)
         end
     end
 
+    # ── Step 4.5: scramble requested column values ────────────────────────────
+    # Applied before missing re-injection so we only deal with concrete values.
+    for cname in model.scrambled
+        result[cname] = _apply_scramble(result[cname])
+    end
+
     # ── Step 5: re-inject missings ────────────────────────────────────────────
     for cname in col_names
         p = model.missingness[cname]
@@ -100,8 +147,9 @@ end
 # ─── Convenience wrapper ──────────────────────────────────────────────────────
 
 """
-    synthesize(df::DataFrame, nrows::Int) -> DataFrame
+    synthesize(df::DataFrame, nrows::Int; scramble=Symbol[]) -> DataFrame
 
-Equivalent to `sample(fit(df), nrows)`.
+Equivalent to `sample(fit(df; scramble=scramble), nrows)`.
 """
-synthesize(df::DataFrame, nrows::Int) = sample(fit(df), nrows)
+synthesize(df::DataFrame, nrows::Int; scramble::Vector{Symbol} = Symbol[]) =
+    sample(fit(df; scramble=scramble), nrows)

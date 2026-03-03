@@ -1,6 +1,7 @@
 # DataMimic
 
 [![Build Status](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml/badge.svg?branch=master)](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml?query=branch%3Amaster)
+[![Coverage](https://codecov.io/gh/mthelm85/DataMimic.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/mthelm85/DataMimic.jl)
 
 DataMimic generates a **synthetic DataFrame** that mimics the shape, column types, and statistical distributions of an input DataFrame — without exposing any of the original records.
 
@@ -40,17 +41,29 @@ syn = synthesize(df, 500)
 model = fit(df)
 syn1  = sample(model, 200)
 syn2  = sample(model, 1_000)
+
+# Scramble sensitive identifier columns so real values never appear verbatim
+df2 = DataFrame(
+    ein    = ["12-3456789", "98-7654321"],   # tax IDs
+    amount = [1200.0, 850.0],
+)
+syn3 = synthesize(df2, 100; scramble=[:ein])
 ```
 
 ## API
 
-### `fit(df) -> SynthModel`
+### `fit(df; scramble=Symbol[]) -> SynthModel`
 
 Profiles the input DataFrame and returns a fitted `SynthModel`. No synthetic data is produced at this stage.
 
 ```julia
 model = fit(df)
+
+# Mark sensitive columns for scrambling
+model = fit(df; scramble=[:ssn, :case_id])
 ```
+
+Columns listed in `scramble` are sampled normally, but before being returned their values are randomly rearranged character-by-character (strings) or digit-by-digit (integers), ensuring no original identifier ever appears verbatim in the synthetic output.
 
 ### `sample(model, nrows) -> DataFrame`
 
@@ -60,12 +73,13 @@ Draws `nrows` synthetic observations from a fitted `SynthModel`. The output has 
 syn = sample(model, 1_000)
 ```
 
-### `synthesize(df, nrows) -> DataFrame`
+### `synthesize(df, nrows; scramble=Symbol[]) -> DataFrame`
 
-Convenience wrapper equivalent to `sample(fit(df), nrows)`.
+Convenience wrapper equivalent to `sample(fit(df; scramble=scramble), nrows)`.
 
 ```julia
 syn = synthesize(df, 500)
+syn = synthesize(df, 500; scramble=[:ein, :case_id])
 ```
 
 ### `SynthModel`
@@ -81,6 +95,7 @@ The struct returned by `fit`. You can inspect it directly:
 | `copula` | `BetaCopula` or `Nothing` | Fitted copula, or `Nothing` if skipped |
 | `copula_columns` | `Vector{Symbol}` | Columns included in the copula |
 | `nrows_original` | `Int` | Row count of the original input |
+| `scrambled` | `Vector{Symbol}` | Columns whose sampled values are scrambled before output |
 
 ## Column type detection
 
@@ -120,6 +135,8 @@ DataMimic emits informative warnings rather than erroring in the following situa
 | No numeric columns | Copula is skipped; all columns sampled independently |
 | Column is entirely missing | Treated as a constant column with value `missing` |
 | `nrows > 10 × original` | Warning that empirical marginals will repeat observed values |
+| Scrambled column is `:constant` | Warning that scrambling a single-value column may have no effect |
+| Scrambled column is `:continuous` | Warning that digit-scrambling floats may produce unexpected values |
 
 ## Dependencies
 
