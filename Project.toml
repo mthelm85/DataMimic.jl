@@ -1,16 +1,18 @@
 name = "DataMimic"
 uuid = "cb7d7795-550a-4968-bbdc-2a75efce1373"
-version = "1.1.0-DEV"
+version = "1.1.1-DEV"
 authors = ["Matt Helm <mthelm85@gmail.com> and contributors"]
 
 [deps]
 Copulas = "ae264745-0b69-425e-9d9d-cf662c5eec93"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
 Copulas = "0.1.33"
 DataFrames = "1.8.1"
+Random = "1.11.0"
 StatsBase = "0.34.10"
 julia = "1.10"
 
