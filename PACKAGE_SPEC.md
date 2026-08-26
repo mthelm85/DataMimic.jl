@@ -196,13 +196,13 @@ Port of the v1 engine with two improvements:
 
 ### 3.2 MSTGenerator (Phase 2)
 
-**Algorithm:** MST (McKenna, Miklau, Sheldon — VLDB 2021).
+**Algorithm:** MST [McKenna et al. 2021].
 
 1. Discretize continuous columns into `k`-bin histograms (default `k = 32`).
 2. Select informative 2-way (or 3-way) marginals via the **exponential
    mechanism** (satisfies ε-DP).
 3. Measure selected marginals with calibrated **Gaussian noise** (satisfies
-   (ε,δ)-DP via zCDP composition).
+   (ε,δ)-DP via zCDP composition [Bun & Steinke 2016]).
 4. Construct a **junction tree** over selected marginal cliques.
 5. Estimate the full joint distribution via belief propagation on the tree.
 6. Sample synthetic rows from the reconstructed distribution and
@@ -216,10 +216,10 @@ Port of the v1 engine with two improvements:
 
 ### 3.3 DPCopulaGenerator (Phase 2)
 
-1. Compute DP-noisy quantiles for each marginal (smooth-sensitivity quantile
-   mechanism).
+1. Compute DP-noisy quantiles for each marginal via the smooth-sensitivity
+   quantile mechanism [Smith 2011].
 2. Compute a **private covariance matrix** via the Analyze-Gauss mechanism
-   (Dwork et al.).
+   [Dwork et al. 2014].
 3. Fit a Gaussian copula from the private covariance.
 
 | Property | Value |
@@ -230,7 +230,10 @@ Port of the v1 engine with two improvements:
 
 ### 3.4 DiffusionGenerator (Phase 3 — Extension)
 
-TabDDPM architecture. Loaded only when `Lux.jl` is present.
+TabDDPM architecture [Kotelnikov et al. 2023]. Gaussian diffusion for
+numerical features [Ho et al. 2020], multinomial diffusion for categoricals
+[Hoogeboom et al. 2021]. DP-SGD training via [Abadi et al. 2016] with
+Rényi DP accounting [Mironov 2017]. Loaded only when `Lux.jl` is present.
 
 | Property | Value |
 |----------|-------|
@@ -534,3 +537,107 @@ DataMimic/
 | `SynthModel` | `FittedCopulaModel` (or other fitted type) |
 | Global RNG | `rng=...` kwarg (global RNG is still the default) |
 | `scramble` (char/digit shuffle) | Removed — use `identifiers` + `fill` instead (§4.3) |
+
+---
+
+## 11. References
+
+Cited by section. Each entry is tagged with the engine or component that
+depends on it so implementers know which papers to read for which phase.
+
+### Copula-Based Synthesis (§3.1)
+
+- **[Sklar 1959]** Sklar, A. "Fonctions de répartition à n dimensions et
+  leurs marges." *Publications de l'Institut Statistique de l'Université
+  de Paris*, 8, 229–231, 1959.
+  — Foundational theorem: any joint distribution decomposes into marginals
+  and a copula. Underpins `CopulaGenerator`. `Phase 1`
+
+- **[Nelsen 2006]** Nelsen, R.B. *An Introduction to Copulas*. 2nd ed.,
+  Springer, 2006.
+  — Reference for Beta and Gaussian copula families used in
+  `CopulaGenerator`. `Phase 1`
+
+### MST / Graphical Model DP Synthesis (§3.2)
+
+- **[McKenna et al. 2021]** McKenna, R., Miklau, G., Sheldon, D.
+  "Winning the NIST Contest: A scalable and general approach to
+  differentially private synthetic data." *Journal of Privacy and
+  Confidentiality*, 11(3), 2021. Also presented at VLDB 2021.
+  — The MST algorithm: exponential-mechanism marginal selection → Gaussian
+  noise → junction tree → belief propagation. Primary reference for
+  `MSTGenerator`. `Phase 2`
+
+- **[Zhang et al. 2017]** Zhang, J., Cormode, G., Procopiuc, C.M.,
+  Srivastava, D., Xiao, X. "PrivBayes: Private Data Release via Bayesian
+  Networks." *ACM Transactions on Database Systems*, 42(4), 2017.
+  — Predecessor to MST; useful for understanding the PGM-based synthesis
+  approach. `Phase 2`
+
+### DP Copula Synthesis (§3.3)
+
+- **[Dwork et al. 2014]** Dwork, C., Talwar, K., Thakurta, A.,
+  Zhang, L. "Analyze Gauss: Optimal Bounds for Privacy-Preserving
+  Principal Component Analysis." *STOC 2014*, pp. 11–20.
+  — Analyze-Gauss mechanism for private covariance estimation.
+  Used by `DPCopulaGenerator`. `Phase 2`
+
+- **[Smith 2011]** Smith, A. "Privacy-preserving statistical estimation
+  with optimal convergence rates." *STOC 2011*, pp. 813–822.
+  — Smooth-sensitivity quantile mechanism for DP-noisy marginals.
+  Used by `DPCopulaGenerator`. `Phase 2`
+
+### Diffusion Model Synthesis (§3.4)
+
+- **[Kotelnikov et al. 2023]** Kotelnikov, A., Baranchuk, D.,
+  Rubachev, I., Babenko, A. "TabDDPM: Modelling Tabular Data with
+  Diffusion Models." *ICML 2023*.
+  — TabDDPM architecture: Gaussian diffusion for numerical features,
+  multinomial diffusion for categoricals, ResNet MLP backbone. Primary
+  reference for `DiffusionGenerator`. `Phase 3`
+
+- **[Ho et al. 2020]** Ho, J., Jain, A., Abbeel, P. "Denoising Diffusion
+  Probabilistic Models." *NeurIPS 2020*.
+  — Foundational DDPM paper: forward noising process, reverse denoising,
+  linear β schedule. `Phase 3`
+
+- **[Hoogeboom et al. 2021]** Hoogeboom, E., Nielsen, D., Jaini, P.,
+  Forré, P., Welling, M. "Argmax Flows and Multinomial Diffusion."
+  *NeurIPS 2021*.
+  — Multinomial diffusion for categorical variables — the mechanism
+  TabDDPM uses for non-numerical columns. `Phase 3`
+
+### Differential Privacy Fundamentals
+
+- **[Abadi et al. 2016]** Abadi, M., Chu, A., Goodfellow, I., McMahan,
+  H.B., Mironov, I., Talwar, K., Zhang, L. "Deep Learning with
+  Differential Privacy." *CCS 2016*, pp. 308–318.
+  — DP-SGD algorithm: per-sample gradient clipping + Gaussian noise
+  injection. Also introduces the moments accountant for tight ε
+  composition. Used by `DiffusionGenerator(dp=true)`. `Phase 3`
+
+- **[Mironov 2017]** Mironov, I. "Rényi Differential Privacy." *CSF
+  2017*, pp. 263–275.
+  — Rényi DP (zCDP) composition framework. Tighter privacy accounting
+  than basic composition. Used by `MSTGenerator` and the DP-SGD
+  accountant. `Phase 2–3`
+
+- **[Bun & Steinke 2016]** Bun, M., Steinke, T. "Concentrated
+  Differential Privacy: Simplifications, Extensions, and Lower Bounds."
+  *TCC 2016*.
+  — Zero-concentrated DP (zCDP). Basis for the composition accounting
+  in `MSTGenerator`. `Phase 2`
+
+### Evaluation Metrics (§6)
+
+- **[Zhao et al. 2021]** Zhao, Z., Kunar, A., Birke, R., Chen, L.Y.
+  "CTAB-GAN: Effective Table Data Synthesizing." *ACML 2021*.
+  — Introduces the DCR (Distance to Closest Record) metric for
+  measuring memorization in synthetic data. Used by `privacy_dcr`.
+  `Phase 4`
+
+- **[Esteban et al. 2017]** Esteban, C., Hyland, S.L., Rätsch, G.
+  "Real-valued (Medical) Time Series Generation with Recurrent
+  Conditional GANs." arXiv:1706.02633, 2017.
+  — Formalizes the TSTR (Train on Synthetic, Test on Real) evaluation
+  protocol. Used by `utility_tstr`. `Phase 4`
