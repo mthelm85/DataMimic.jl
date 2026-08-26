@@ -414,8 +414,17 @@ Private generators are not yet implemented. They arrive in v2.0-beta (Phase 2).
 
 ## 6. Evaluation Suite — `DataMimic.Evaluate` (Phase 4)
 
-A submodule providing three standard metrics. The first two have zero heavy
-dependencies; TSTR uses MLJ via a package extension.
+A submodule providing three standard metrics. All use lightweight
+dependencies already in the core dep tree or `DecisionTree.jl` (6 deps,
+all stdlib-level). No heavy ML framework required.
+
+**Why not MLJ.jl?** MLJ pulls in 24 direct dependencies (MLJBase,
+MLJModels, MLJTuning, MLJEnsembles, MLJTransforms, ScientificTypes,
+OpenML, ...) — most of which are irrelevant for TSTR evaluation.
+`DecisionTree.jl` provides random forests with a standalone API in 6
+deps. Since TSTR compares "train on synth" vs. "train on real" using the
+*same* model class, consistency matters more than peak model performance,
+and a random forest is a standard TSTR baseline.
 
 ### 6.1 `fidelity_score(real, synth) -> NamedTuple`
 
@@ -425,19 +434,27 @@ dependencies; TSTR uses MLJ via a package extension.
   pairwise Spearman correlation matrices.
 - **Aggregate:** Weighted mean of 1D scores and the 2D score, returned
   alongside the per-column breakdown.
+- **Deps:** `StatsBase`, `LinearAlgebra` (already in core).
 
 ### 6.2 `privacy_dcr(real, synth) -> NamedTuple`
 
 - Computes the **Distance to Closest Record** (DCR) for every synthetic row.
 - Returns the DCR vector, its median, 5th-percentile, and a count of
   exact matches (DCR = 0).
+- **Deps:** `StatsBase`, `LinearAlgebra` (already in core).
 
 ### 6.3 `utility_tstr(real, synth, target; model=...) -> NamedTuple`
 
-- **Requires:** `using MLJ` (package extension).
-- Trains a classifier/regressor on `synth`, evaluates on held-out `real`.
-- Returns accuracy/RMSE on synth-trained vs. real-trained models for
-  comparison.
+- Trains a `RandomForestClassifier` or `RandomForestRegressor` from
+  `DecisionTree.jl` on `synth`, evaluates on held-out `real`.
+- Auto-detects classification vs. regression from the `target` column type.
+- Returns accuracy (classification) or RMSE (regression) for both
+  synth-trained and real-trained models, plus the ratio.
+- Users who want TSTR with a different model can call `fidelity_score`
+  and `privacy_dcr` for the statistical metrics and run their own
+  train/evaluate loop with any ML framework.
+- **Deps:** `DecisionTree.jl` (6 deps, all stdlib-level). Light enough
+  to be a direct dependency rather than a package extension.
 
 ---
 
@@ -463,10 +480,9 @@ DataMimic/
 │       ├── Evaluate.jl       # submodule root                         (Phase 4)
 │       ├── fidelity.jl
 │       ├── dcr.jl
-│       └── tstr.jl           # MLJ extension glue
+│       └── tstr.jl           # TSTR via DecisionTree.jl
 ├── ext/
-│   ├── LuxExt.jl             # DiffusionGenerator engine              (Phase 3)
-│   └── MLJExt.jl             # utility_tstr implementation            (Phase 4)
+│   └── LuxExt.jl             # DiffusionGenerator engine              (Phase 3)
 ├── test/
 │   ├── runtests.jl
 │   ├── test_detect.jl
@@ -492,6 +508,7 @@ DataMimic/
 | `Copulas.jl` | BetaCopula, GaussianCopula fitting |
 | `StatsBase.jl` | countmap, Weights, sampling |
 | `DataFrames.jl` | Direct dep — 95% of users will use it |
+| `DecisionTree.jl` | Random forests for TSTR evaluation (6 stdlib-level deps) |
 | `Random` | RNG threading |
 | `Serialization` | Model save/load |
 | `LinearAlgebra` | Covariance, PSD projection (DP copula) |
@@ -501,7 +518,6 @@ DataMimic/
 | Package | Extension | Unlocks |
 |---------|-----------|---------|
 | `Lux.jl` | `LuxExt` | `DiffusionGenerator` |
-| `MLJ.jl` | `MLJExt` | `utility_tstr` |
 
 ---
 
@@ -515,7 +531,7 @@ DataMimic/
 | `fill` key is not in `identifiers` | `ArgumentError("fill key :foo is not an identifier column")` |
 | `AbstractPublicGenerator` + `PrivacyBudget` | `ArgumentError("CopulaGenerator does not support privacy; use a private generator or remove the privacy budget.")` |
 | `AbstractPrivateGenerator` + `privacy === nothing` | `ArgumentError("MSTGenerator requires a PrivacyBudget.")` |
-| Extension engine not loaded | `ErrorException` with `using Lux` / `using MLJ` instructions |
+| Extension engine not loaded | `ErrorException` with `using Lux` instructions |
 | `sample(model, n)` with `n < 1` | `ArgumentError` |
 | `n > 10 × n_original` | `@warn` (empirical marginals will repeat) |
 | Entirely-missing column | `@warn`, treated as constant(`missing`) |
