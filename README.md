@@ -90,7 +90,7 @@ The struct returned by `fit`. You can inspect it directly:
 |---|---|---|
 | `column_names` | `Vector{Symbol}` | Ordered column names from the input |
 | `column_types` | `Vector{Symbol}` | Detected type per column (see below) |
-| `marginals` | `Dict{Symbol, Any}` | Fitted marginal per column |
+| `marginals` | `Dict{Symbol, Marginal}` | Fitted marginal per column |
 | `missingness` | `Dict{Symbol, Float64}` | Observed missingness rate per column |
 | `copula` | `BetaCopula` or `Nothing` | Fitted copula, or `Nothing` if skipped |
 | `copula_columns` | `Vector{Symbol}` | Columns included in the copula |

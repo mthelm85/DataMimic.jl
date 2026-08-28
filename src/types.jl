@@ -1,27 +1,278 @@
-# Marginal types
+# ─── Abstract Hierarchy ──────────────────────────────────────────────────────
+
+abstract type AbstractGenerator end
+abstract type AbstractPublicGenerator  <: AbstractGenerator end
+abstract type AbstractPrivateGenerator <: AbstractGenerator end
+
+abstract type AbstractFittedModel end
+
+# ─── Privacy Budget ──────────────────────────────────────────────────────────
+
+"""
+    PrivacyBudget(; epsilon, delta=1e-5)
+
+Differential privacy parameters used by private generators
+(`MSTGenerator`, `DPCopulaGenerator`, `DiffusionGenerator(dp=true)`).
+"""
+Base.@kwdef struct PrivacyBudget
+    epsilon::Float64
+    delta::Float64 = 1e-5
+
+    function PrivacyBudget(epsilon, delta)
+        epsilon > 0   || throw(ArgumentError("ε must be positive, got $epsilon"))
+        0 ≤ delta < 1 || throw(ArgumentError("δ must be in [0, 1), got $delta"))
+        new(Float64(epsilon), Float64(delta))
+    end
+end
+
+# ─── Generator Configs ───────────────────────────────────────────────────────
+
+"""
+    AutoGenerator()
+
+Meta-generator that selects a concrete engine at `fit` time based on
+table shape and privacy requirements. See PACKAGE_SPEC §5 for dispatch rules.
+"""
+struct AutoGenerator <: AbstractGenerator end
+
+"""
+    CopulaGenerator(copula_type::Symbol=:beta)
+
+Public (non-private) copula-based synthetic data generator.
+`copula_type` must be `:beta` or `:gaussian`.
+"""
+struct CopulaGenerator <: AbstractPublicGenerator
+    copula_type::Symbol
+
+    function CopulaGenerator(copula_type::Symbol)
+        copula_type in (:beta, :gaussian) ||
+            throw(ArgumentError("copula_type must be :beta or :gaussian, got :$copula_type"))
+        new(copula_type)
+    end
+end
+CopulaGenerator() = CopulaGenerator(:beta)
+
+"""
+    MSTGenerator(max_marginal_order::Int=2)
+
+Private synthetic data via MST (McKenna et al. 2021): exponential-mechanism
+marginal selection → Gaussian noise → junction tree → belief propagation.
+Satisfies (ε,δ)-DP via zCDP composition.
+"""
+struct MSTGenerator <: AbstractPrivateGenerator
+    max_marginal_order::Int
+
+    function MSTGenerator(max_marginal_order::Int)
+        max_marginal_order in (2, 3) ||
+            throw(ArgumentError("max_marginal_order must be 2 or 3, got $max_marginal_order"))
+        new(max_marginal_order)
+    end
+end
+MSTGenerator() = MSTGenerator(2)
+
+"""
+    DPCopulaGenerator()
+
+DP-noisy histogram marginals + private covariance Gaussian copula.
+Suited for continuous-heavy tables under moderate ε.
+"""
+struct DPCopulaGenerator <: AbstractPrivateGenerator end
+
+"""
+    DiffusionGenerator(; dp=false, epochs=100, batch_size=512)
+
+TabDDPM with optional DP-SGD. Requires the `LuxExt` package extension
+(`using Lux, Zygote` before calling `fit`).
+"""
+Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
+    dp::Bool        = false
+    epochs::Int     = 100
+    batch_size::Int = 512
+
+    function DiffusionGenerator(dp, epochs, batch_size)
+        epochs > 0     || throw(ArgumentError("epochs must be positive, got $epochs"))
+        batch_size > 0 || throw(ArgumentError("batch_size must be positive, got $batch_size"))
+        new(dp, epochs, batch_size)
+    end
+end
+
+# ─── Column Schema Hints ────────────────────────────────────────────────────
+
+const VALID_COLUMN_KINDS = (:continuous, :integer, :categorical, :binary, :constant, :identifier)
+
+"""
+    ColumnHint(; name, kind, levels=nothing)
+
+Override auto-detected column type. `kind` must be one of:
+`:continuous`, `:integer`, `:categorical`, `:binary`, `:constant`, `:identifier`.
+"""
+Base.@kwdef struct ColumnHint
+    name::Symbol
+    kind::Symbol
+    levels::Union{Nothing, Vector} = nothing
+
+    function ColumnHint(name, kind, levels)
+        kind in VALID_COLUMN_KINDS ||
+            throw(ArgumentError("ColumnHint kind must be one of $VALID_COLUMN_KINDS, got :$kind"))
+        new(name, kind, levels)
+    end
+end
+
+# ─── Marginal Types ─────────────────────────────────────────────────────────
 
 struct EmpiricalMarginal
-    sorted_values::Vector       # sorted non-missing observed values
-    original_eltype::Type       # eltype of the original column (non-missing part)
+    sorted_values::Vector{Float64}
+    original_eltype::Type
 end
 
 struct CategoricalMarginal
-    levels::Vector              # unique observed levels
-    probs::Vector{Float64}      # empirical probability per level
+    levels::Vector
+    probs::Vector{Float64}
 end
 
-struct ConstantMarginal
-    value::Any                  # the single observed value (may be missing)
+struct ConstantMarginal{T}
+    value::T
 end
 
-# Top-level model struct
-struct SynthModel
+# ─── Shared type aliases ────────────────────────────────────────────────────
+
+"""Union of all marginal types — used in marginals dicts."""
+const Marginal = Union{EmpiricalMarginal, CategoricalMarginal, ConstantMarginal}
+
+"""Union of valid fill specs for identifier columns."""
+const FillSpec = Union{Symbol, String, Function}
+
+# ─── Fitted Model Types ─────────────────────────────────────────────────────
+
+"""
+    FittedCopulaModel <: AbstractFittedModel
+
+Result of fitting a `CopulaGenerator`. Contains all information needed
+to sample synthetic data.
+"""
+struct FittedCopulaModel{C, M} <: AbstractFittedModel
+    column_names::Vector{Symbol}       # all columns in original order
+    column_kinds::Vector{Symbol}       # :continuous, :integer, etc. or :identifier
+    marginals::Dict{Symbol, Marginal}  # stat columns only
+    missingness::Dict{Symbol, Float64} # stat columns only
+    copula::C                          # fitted copula or nothing
+    copula_columns::Vector{Symbol}     # numeric stat columns used in copula
+    n_original::Int
+    identifier_columns::Vector{Symbol}
+    identifier_fills::Dict{Symbol, FillSpec}
+    materializer::M                    # Tables.materializer of original input
+    rng::AbstractRNG
+end
+
+# ─── Discretization Info (MST engine) ──────────────────────────────────────
+
+"""
+Metadata for discretizing a column into integer bin indices.
+
+- Continuous/integer: `bin_edges` is a `k+1`-length vector of breakpoints.
+- Categorical/binary/constant: `levels` maps bin index → original value.
+"""
+struct DiscretizationInfo
+    kind::Symbol
+    original_eltype::Type
+    bin_edges::Union{Nothing, Vector{Float64}}  # for continuous / integer
+    levels::Union{Nothing, Vector}              # for categorical / binary / constant
+    n_bins::Int
+end
+
+# ─── DP-specific marginal types ────────────────────────────────────────────
+
+"""
+A DP-noisy histogram marginal for continuous / integer columns.
+
+Stores `k` bin probabilities and `k+1` bin edges.  Sampling draws a bin
+from the probability vector and then samples uniformly within the bin.
+"""
+struct DPHistogramMarginal
+    bin_edges::Vector{Float64}
+    probs::Vector{Float64}
+    original_eltype::Type
+end
+
+# ─── Fitted Model Types (Phase 2) ─────────────────────────────────────────
+
+"""
+    FittedMSTModel <: AbstractFittedModel
+
+Result of fitting an `MSTGenerator`.  Stores discretization metadata, a
+spanning-tree structure, and noisy conditional distributions for sampling.
+"""
+struct FittedMSTModel{M} <: AbstractFittedModel
     column_names::Vector{Symbol}
-    column_types::Vector{Symbol}  # :continuous, :integer, :categorical, :binary, :constant
-    marginals::Dict{Symbol, Any}
+    column_kinds::Vector{Symbol}
+    stat_columns::Vector{Symbol}
+    discretization::Dict{Symbol, DiscretizationInfo}
+    tree_edges::Vector{Tuple{Int, Int}}            # (parent, child) indices into stat_columns
+    root::Int                                       # index into stat_columns
+    root_marginal::Vector{Float64}                  # probability vector for root column
+    conditionals::Dict{Tuple{Int,Int}, Matrix{Float64}}  # P(child | parent)
     missingness::Dict{Symbol, Float64}
-    copula::Any                   # fitted BetaCopula, or Nothing
+    n_original::Int
+    identifier_columns::Vector{Symbol}
+    identifier_fills::Dict{Symbol, FillSpec}
+    materializer::M
+    rng::AbstractRNG
+end
+
+# Union of marginal types used by DP generators.
+const DPMarginal = Union{DPHistogramMarginal, CategoricalMarginal, ConstantMarginal}
+
+"""
+    FittedDPCopulaModel <: AbstractFittedModel
+
+Result of fitting a `DPCopulaGenerator`.  DP-noisy histogram marginals
+with an optional private-covariance Gaussian copula.
+"""
+struct FittedDPCopulaModel{C, M} <: AbstractFittedModel
+    column_names::Vector{Symbol}
+    column_kinds::Vector{Symbol}
+    marginals::Dict{Symbol, DPMarginal}
+    missingness::Dict{Symbol, Float64}
+    copula::C                          # GaussianCopula or nothing
     copula_columns::Vector{Symbol}
-    nrows_original::Int
-    scrambled::Vector{Symbol}     # columns whose sampled values are character-scrambled
+    n_original::Int
+    identifier_columns::Vector{Symbol}
+    identifier_fills::Dict{Symbol, FillSpec}
+    materializer::M
+    rng::AbstractRNG
+end
+
+# ─── Fitted Model Types (Phase 3) ─────────────────────────────────────────
+
+"""
+    FittedDiffusionModel <: AbstractFittedModel
+
+Result of fitting a `DiffusionGenerator`.  Stores the trained Lux model
+(TabDDPM), preprocessing metadata, and diffusion schedule.
+"""
+struct FittedDiffusionModel{L, P, S, Mat} <: AbstractFittedModel
+    column_names::Vector{Symbol}
+    column_kinds::Vector{Symbol}
+    # Preprocessing metadata
+    num_columns::Vector{Symbol}          # numeric columns in model order
+    cat_columns::Vector{Symbol}          # categorical columns in model order
+    num_means::Vector{Float32}           # per-column mean (for z-score)
+    num_stds::Vector{Float32}            # per-column std  (for z-score)
+    cat_levels::Dict{Symbol, Vector}     # column → sorted levels
+    cat_dims::Vector{Int}                # one-hot width per cat column
+    # Trained neural network (Lux)
+    lux_model::L                         # Lux model (backbone + embedding)
+    trained_params::P                    # trained NamedTuple params
+    model_state::S                       # Lux state
+    # Diffusion schedule
+    n_steps::Int
+    betas::Vector{Float32}
+    alphas_cumprod::Vector{Float32}
+    # Standard fields
+    missingness::Dict{Symbol, Float64}
+    n_original::Int
+    identifier_columns::Vector{Symbol}
+    identifier_fills::Dict{Symbol, FillSpec}
+    materializer::Mat
+    rng::AbstractRNG
 end

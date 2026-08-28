@@ -1,32 +1,25 @@
-using DataFrames
-using StatsBase
-using Random
-
-# ─── Inverse-CDF helpers ──────────────────────────────────────────────────────
+# ─── Sampling Helpers ────────────────────────────────────────────────────────
 
 # Direct O(1) quantile from a pre-sorted vector using linear interpolation.
-# This avoids the copy + partialsort! overhead that Statistics.quantile() incurs
-# on every call when passed an unsorted (or unknown-sorted) vector.
 @inline function _quantile_sorted(sv::Vector{Float64}, u::Float64)
     n    = length(sv)
-    idx  = u * (n - 1)           # 0-based float position in sv
+    idx  = u * (n - 1)           # 0-based float position
     lo   = floor(Int, idx) + 1   # 1-based lower index
-    hi   = min(lo + 1, n)        # 1-based upper index (clamped at last element)
+    hi   = min(lo + 1, n)        # clamped upper index
     frac = idx - (lo - 1)        # interpolation weight ∈ [0, 1)
     return sv[lo] + frac * (sv[hi] - sv[lo])
 end
 
-# Map a vector of uniform [0,1] values through the empirical quantile function.
+# Map uniform [0,1] values through the empirical quantile function.
 function _invert_empirical(m::EmpiricalMarginal, u_vec::AbstractVector{Float64})
     sv = m.sorted_values
     return [_quantile_sorted(sv, clamp(u, 0.0, 1.0)) for u in u_vec]
 end
 
-# Convert raw Float64 quantile output to the column's original eltype.
-function _cast_numeric(vals::Vector{Float64}, col_type::Symbol, T::Type)
-    if col_type == :integer
+# Cast Float64 quantile output to the column's original element type.
+function _cast_numeric(vals::Vector{Float64}, col_kind::Symbol, T::Type)
+    if col_kind == :integer
         rounded = round.(Int64, vals)
-        # Narrow back to original integer type if narrower than Int64.
         return T <: Integer ? convert(Vector{T}, rounded) :
                               convert(Vector{T}, Float64.(rounded))
     else
@@ -35,121 +28,245 @@ function _cast_numeric(vals::Vector{Float64}, col_type::Symbol, T::Type)
 end
 
 # Draw n samples from a categorical marginal.
-function _sample_categorical(m::CategoricalMarginal, n::Int)
-    return StatsBase.sample(m.levels, Weights(m.probs), n)
+function _sample_categorical(m::CategoricalMarginal, n::Int, rng::AbstractRNG)
+    return StatsBase.sample(rng, m.levels, StatsBase.Weights(m.probs), n)
 end
 
-# ─── Scramble helpers ─────────────────────────────────────────────────────────
+# ─── Common post-processing ─────────────────────────────────────────────────
 
-# Scramble all characters of a string so the result is unrecognisable.
-_scramble_value(v::AbstractString) = String(Random.shuffle(collect(v)))
+"""
+Re-inject missing values, fill identifiers, assemble columns in the
+original order, and materialize.  Shared by all `sample` methods.
+"""
+function _postprocess(result::Dict{Symbol, Vector},
+                      model, n::Int, rng::AbstractRNG)
+    # ── Re-inject missing values ────────────────────────────────────────
+    for (cname, p) in model.missingness
+        p > 0.0 || continue
+        haskey(result, cname) || continue
+        col = result[cname]
+        T   = eltype(col)
+        new = Vector{Union{nonmissingtype(T), Missing}}(col)
+        mask = rand(rng, n) .< p
+        new[mask] .= missing
+        result[cname] = new
+    end
 
-# Scramble the decimal digits of an integer so the result is unrecognisable.
-# Leading zeros produced by the scramble are dropped by parse(), which may
-# reduce the magnitude (e.g. 10000 → "00001" → 1). This is intentional:
-# the goal is to prevent the output from being a real identifier, not to
-# preserve the exact range.
-function _scramble_value(v::T) where T <: Integer
-    digs     = collect(string(abs(v)))
-    Random.shuffle!(digs)
-    scrambled = parse(Int64, String(digs))
-    return T(v < 0 ? -scrambled : scrambled)
+    # ── Fill identifier columns ─────────────────────────────────────────
+    for cname in model.identifier_columns
+        if haskey(model.identifier_fills, cname)
+            result[cname] = _apply_fill(
+                model.identifier_fills[cname], cname, n)
+        end
+    end
+
+    # ── Assemble in original column order ───────────────────────────────
+    output_names = Symbol[]
+    output_cols  = Vector[]
+    for cname in model.column_names
+        if haskey(result, cname)
+            push!(output_names, cname)
+            push!(output_cols, result[cname])
+        end
+    end
+
+    # ── Materialize to original table type ──────────────────────────────
+    result_nt = NamedTuple{Tuple(output_names)}(Tuple(output_cols))
+    return model.materializer(result_nt)
 end
 
-# Fallback: other types (Float64, Bool, etc.) are passed through unchanged.
-# fit() already warns when a scrambled column has one of these types.
-_scramble_value(v) = v
-
-# Apply scramble element-wise to a sampled column vector.
-_apply_scramble(col::Vector) = [_scramble_value(v) for v in col]
-
-# ─── Main sample function ─────────────────────────────────────────────────────
+# ─── sample(::FittedCopulaModel) ────────────────────────────────────────────
 
 """
-    sample(model::SynthModel, nrows::Int) -> DataFrame
+    sample(model::FittedCopulaModel, n::Int; rng=model.rng) -> table
 
-Draw `nrows` synthetic observations from a fitted `SynthModel`.
+Generate `n` synthetic rows from a fitted copula model. Returns the
+same table type as the original input (via `Tables.materializer`).
 """
-function sample(model::SynthModel, nrows::Int)
-    nrows < 1 && error("nrows must be at least 1.")
+function sample(model::FittedCopulaModel, n::Int;
+                rng::AbstractRNG = model.rng)
+    n ≥ 1 || throw(ArgumentError("n must be at least 1, got $n"))
 
-    if nrows > 10 * model.nrows_original
-        @warn "Requested nrows ($nrows) is more than 10× the original " *
-              "($(model.nrows_original) rows). Empirical marginals will repeat values."
+    if n > 10 * model.n_original
+        @warn "Requested n ($n) is more than 10× the original " *
+              "($(model.n_original) rows). Empirical marginals will " *
+              "repeat values."
     end
 
     col_names = model.column_names
-    col_types = model.column_types
+    col_kinds = model.column_kinds
     result    = Dict{Symbol, Vector}()
 
-    # Precompute name → index lookup to avoid O(ncols) findfirst per copula column.
-    name_to_idx = Dict(n => i for (i, n) in enumerate(col_names))
+    name_to_idx = Dict(nm => i for (i, nm) in enumerate(col_names))
 
-    # ── Step 1–3: copula-based sampling of numeric columns ───────────────────
-    if !isnothing(model.copula) && length(model.copula_columns) >= 2
-        # rand returns (d × nrows) in column-major layout. Transposing to (nrows × d)
-        # once means each per-column slice U_T[:, j] is contiguous in memory,
-        # avoiding the cache-unfriendly row reads of U_mat[j, :].
-        U_T = Matrix(rand(model.copula, nrows)')   # (nrows × d)
+    # ── 1. Copula-based sampling of numeric columns ──────────────────────
+    stat_numeric = model.copula_columns
 
-        for (j, cname) in enumerate(model.copula_columns)
-            ctype = col_types[name_to_idx[cname]]
+    if !isnothing(model.copula) && length(stat_numeric) >= 2
+        # rand returns (d × n); transpose to (n × d) for contiguous column slices
+        U_T = Matrix(rand(rng, model.copula, n)')
+
+        for (j, cname) in enumerate(stat_numeric)
+            kind  = col_kinds[name_to_idx[cname]]
             m     = model.marginals[cname]::EmpiricalMarginal
-            u_vec = U_T[:, j]                      # contiguous column slice
+            u_vec = U_T[:, j]
             vals  = _invert_empirical(m, u_vec)
-            result[cname] = _cast_numeric(vals, ctype, m.original_eltype)
+            result[cname] = _cast_numeric(vals, kind, m.original_eltype)
         end
     else
-        # No copula: sample numeric columns independently.
+        # No copula: sample numeric columns independently
         for (i, cname) in enumerate(col_names)
-            ctype = col_types[i]
-            ctype in (:continuous, :integer) || continue
+            kind = col_kinds[i]
+            kind == :identifier && continue
+            kind in (:continuous, :integer) || continue
             m     = model.marginals[cname]::EmpiricalMarginal
-            u_vec = rand(nrows)
+            u_vec = rand(rng, n)
             vals  = _invert_empirical(m, u_vec)
-            result[cname] = _cast_numeric(vals, ctype, m.original_eltype)
+            result[cname] = _cast_numeric(vals, kind, m.original_eltype)
         end
     end
 
-    # ── Step 4: sample categorical / binary / constant columns ───────────────
+    # ── 2. Sample categorical / binary / constant columns ────────────────
     for (i, cname) in enumerate(col_names)
-        ctype = col_types[i]
-        if ctype in (:categorical, :binary)
+        kind = col_kinds[i]
+        kind == :identifier && continue
+        if kind in (:categorical, :binary)
             m = model.marginals[cname]::CategoricalMarginal
-            result[cname] = _sample_categorical(m, nrows)
-        elseif ctype == :constant
+            result[cname] = _sample_categorical(m, n, rng)
+        elseif kind == :constant
             m = model.marginals[cname]::ConstantMarginal
-            result[cname] = fill(m.value, nrows)
+            result[cname] = fill(m.value, n)
         end
     end
 
-    # ── Step 4.5: scramble requested column values ────────────────────────────
-    # Applied before missing re-injection so we only deal with concrete values.
-    for cname in model.scrambled
-        result[cname] = _apply_scramble(result[cname])
-    end
-
-    # ── Step 5: re-inject missings ────────────────────────────────────────────
-    for cname in col_names
-        p = model.missingness[cname]
-        p > 0.0 || continue
-        col      = result[cname]
-        new_col  = allowmissing(col)
-        mask     = rand(nrows) .< p
-        new_col[mask] .= missing
-        result[cname] = new_col
-    end
-
-    # ── Step 6: assemble DataFrame in original column order ───────────────────
-    return DataFrame([cname => result[cname] for cname in col_names])
+    return _postprocess(result, model, n, rng)
 end
 
-# ─── Convenience wrapper ──────────────────────────────────────────────────────
+# ─── sample(::FittedMSTModel) ───────────────────────────────────────────────
 
 """
-    synthesize(df::DataFrame, nrows::Int; scramble=Symbol[]) -> DataFrame
+    sample(model::FittedMSTModel, n::Int; rng=model.rng) -> table
 
-Equivalent to `sample(fit(df; scramble=scramble), nrows)`.
+Generate `n` synthetic rows from a fitted MST model. Samples from the
+tree-structured joint distribution and un-discretizes back to the
+original domain.
 """
-synthesize(df::DataFrame, nrows::Int; scramble::Vector{Symbol} = Symbol[]) =
-    sample(fit(df; scramble=scramble), nrows)
+function sample(model::FittedMSTModel, n::Int;
+                rng::AbstractRNG = model.rng)
+    n ≥ 1 || throw(ArgumentError("n must be at least 1, got $n"))
+
+    if n > 10 * model.n_original
+        @warn "Requested n ($n) is more than 10× the original " *
+              "($(model.n_original) rows)."
+    end
+
+    stat_cols = model.stat_columns
+    d = length(stat_cols)
+
+    # ── 1. Sample discrete bin indices via the tree ──────────────────────
+    sampled_bins = Dict{Int, Vector{Int}}()
+
+    # Root
+    root = model.root
+    sampled_bins[root] = StatsBase.sample(
+        rng, 1:length(model.root_marginal),
+        StatsBase.Weights(model.root_marginal), n)
+
+    # Children — tree_edges are in breadth-first order from construction
+    for (parent, child) in model.tree_edges
+        cond = model.conditionals[(parent, child)]
+        parent_vals = sampled_bins[parent]
+        n_child_bins = size(cond, 2)
+        child_vals = Vector{Int}(undef, n)
+        for i in 1:n
+            pv = parent_vals[i]
+            child_vals[i] = StatsBase.sample(
+                rng, 1:n_child_bins,
+                StatsBase.Weights(@view cond[pv, :]))
+        end
+        sampled_bins[child] = child_vals
+    end
+
+    # ── 2. Undiscretize and build result ─────────────────────────────────
+    result = Dict{Symbol, Vector}()
+    for (idx, name) in enumerate(stat_cols)
+        info = model.discretization[name]
+        bins = sampled_bins[idx]
+        result[name] = _undiscretize(bins, info, n, rng)
+    end
+
+    return _postprocess(result, model, n, rng)
+end
+
+# ─── sample(::FittedDPCopulaModel) ──────────────────────────────────────────
+
+"""
+    sample(model::FittedDPCopulaModel, n::Int; rng=model.rng) -> table
+
+Generate `n` synthetic rows from a fitted DP-copula model. Uses the
+private Gaussian copula for numeric columns and noisy categoricals.
+"""
+function sample(model::FittedDPCopulaModel, n::Int;
+                rng::AbstractRNG = model.rng)
+    n ≥ 1 || throw(ArgumentError("n must be at least 1, got $n"))
+
+    if n > 10 * model.n_original
+        @warn "Requested n ($n) is more than 10× the original " *
+              "($(model.n_original) rows)."
+    end
+
+    col_names = model.column_names
+    col_kinds = model.column_kinds
+    result    = Dict{Symbol, Vector}()
+
+    name_to_idx = Dict(nm => i for (i, nm) in enumerate(col_names))
+
+    # ── 1. Copula-based numeric sampling ─────────────────────────────────
+    stat_numeric = model.copula_columns
+
+    if !isnothing(model.copula) && length(stat_numeric) >= 2
+        U_T = Matrix(rand(rng, model.copula, n)')
+        for (j, cname) in enumerate(stat_numeric)
+            m = model.marginals[cname]::DPHistogramMarginal
+            result[cname] = _invert_dp_marginal(m, U_T[:, j], rng)
+        end
+    else
+        for (i, cname) in enumerate(col_names)
+            kind = col_kinds[i]
+            kind == :identifier && continue
+            kind in (:continuous, :integer) || continue
+            m = model.marginals[cname]
+            if m isa DPHistogramMarginal
+                result[cname] = _invert_dp_marginal(m, rand(rng, n), rng)
+            elseif m isa ConstantMarginal
+                result[cname] = fill(m.value, n)
+            end
+        end
+    end
+
+    # ── 2. Categorical / binary / constant ───────────────────────────────
+    for (i, cname) in enumerate(col_names)
+        kind = col_kinds[i]
+        kind == :identifier && continue
+        if kind in (:categorical, :binary)
+            m = model.marginals[cname]::CategoricalMarginal
+            result[cname] = _sample_categorical(m, n, rng)
+        elseif kind == :constant
+            m = model.marginals[cname]::ConstantMarginal
+            result[cname] = fill(m.value, n)
+        end
+    end
+
+    return _postprocess(result, model, n, rng)
+end
+
+# ─── Convenience ─────────────────────────────────────────────────────────────
+
+"""
+    synthesize(generator, table, n; kw...) -> table
+
+Equivalent to `sample(fit(generator, table; kw...), n)`.
+"""
+function synthesize(generator::AbstractGenerator, table, n::Int; kw...)
+    return sample(fit(generator, table; kw...), n)
+end

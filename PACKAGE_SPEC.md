@@ -15,7 +15,7 @@ Version 2.0 intentionally **breaks backward compatibility** with v1.x.
 | 1 | **Tables.jl native** | Every public function accepts any `Tables.istable` source and returns the same concrete type the caller passed in (via `Tables.materializer`). |
 | 2 | **Type-stable artifacts** | Generator configs and fitted models are distinct concrete types — no `Any`-typed fields. |
 | 3 | **Reproducibility** | Every stochastic function accepts an `rng::AbstractRNG` keyword (default `Random.default_rng()`). |
-| 4 | **Lightweight core** | Heavy dependencies (Lux.jl, MLJ.jl) live behind Julia package extensions; the core has zero deep-learning deps. |
+| 4 | **Lightweight core** | Heavy dependencies (Lux.jl) live behind Julia package extensions; the core has zero deep-learning deps. |
 | 5 | **Privacy by construction** | A `PrivacyBudget` is required for private generators and rejected by public ones — invalid combinations are caught at `fit` time, not silently ignored. |
 | 6 | **Identifiers are excluded, not obfuscated** | Identifier columns carry zero statistical signal. They are dropped from the output by default, or filled with user-supplied placeholders — never character-shuffled. |
 
@@ -23,10 +23,11 @@ Version 2.0 intentionally **breaks backward compatibility** with v1.x.
 
 | Phase | Contents | Milestone |
 |-------|----------|-----------|
-| **Phase 1 — Foundation** | Type system, Tables.jl plumbing, `CopulaGenerator` (port from v1), identifier handling, column-type detection, `AutoGenerator` (public-only dispatch) | v2.0-alpha |
-| **Phase 2 — Privacy** | `PrivacyBudget`, `MSTGenerator`, `DPCopulaGenerator`, AutoGenerator private dispatch | v2.0-beta |
+| **Phase 1 — Foundation** | Type system (including `PrivacyBudget` struct), Tables.jl plumbing, `CopulaGenerator` (port from v1), identifier handling, column-type detection, `AutoGenerator` (public-only dispatch), serialization | v2.0-alpha |
+| **Phase 2 — Privacy** | `MSTGenerator`, `DPCopulaGenerator`, AutoGenerator private dispatch | v2.0-beta |
 | **Phase 3 — Deep Generative** | `DiffusionGenerator` (Lux extension): TabDDPM with multinomial diffusion for categoricals; non-private mode first, then DP-SGD | v2.0-rc |
-| **Phase 4 — Evaluation** | `DataMimic.Evaluate` submodule (fidelity, DCR, TSTR via MLJ extension) | v2.0 |
+| **Phase 4 — Evaluation** | `DataMimic.Evaluate` submodule (fidelity, DCR, TSTR via DecisionTree.jl) | v2.0 |
+| **Phase 4b — Extended Evaluation** | Jensen–Shannon divergence, pairwise marginal error, privacy–utility sweep | v2.0.1 |
 
 **Phase 3 detail — DiffusionGenerator:**  The core TabDDPM (noise schedule,
 ResNet MLP with timestep embedding, Gaussian + multinomial diffusion,
@@ -83,6 +84,12 @@ struct AutoGenerator <: AbstractGenerator end
 
 struct CopulaGenerator <: AbstractPublicGenerator
     copula_type::Symbol   # :beta (default) or :gaussian
+
+    function CopulaGenerator(copula_type::Symbol)
+        copula_type in (:beta, :gaussian) ||
+            throw(ArgumentError("copula_type must be :beta or :gaussian, got :$copula_type"))
+        new(copula_type)
+    end
 end
 CopulaGenerator() = CopulaGenerator(:beta)
 
@@ -100,6 +107,12 @@ Replaces the earlier "GraphicalDPGenerator" name to cite the actual algorithm.
 """
 struct MSTGenerator <: AbstractPrivateGenerator
     max_marginal_order::Int   # 2 for 2-way, 3 for 3-way (default 2)
+
+    function MSTGenerator(max_marginal_order::Int)
+        max_marginal_order in (2, 3) ||
+            throw(ArgumentError("max_marginal_order must be 2 or 3, got $max_marginal_order"))
+        new(max_marginal_order)
+    end
 end
 MSTGenerator() = MSTGenerator(2)
 
@@ -121,6 +134,12 @@ Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
     dp::Bool        = false
     epochs::Int     = 100
     batch_size::Int = 512
+
+    function DiffusionGenerator(dp, epochs, batch_size)
+        epochs > 0     || throw(ArgumentError("epochs must be positive, got $epochs"))
+        batch_size > 0 || throw(ArgumentError("batch_size must be positive, got $batch_size"))
+        new(dp, epochs, batch_size)
+    end
 end
 ```
 
@@ -150,16 +169,17 @@ the output.
 Each generator produces its own concrete `AbstractFittedModel`:
 
 ```julia
-struct FittedCopulaModel <: AbstractFittedModel
+struct FittedCopulaModel{C, M} <: AbstractFittedModel
     column_names::Vector{Symbol}
     column_kinds::Vector{Symbol}
-    marginals::Dict{Symbol, Any}  # Phase 1: tighten to Union{EmpiricalMarginal, ...}
+    marginals::Dict{Symbol, Marginal}
     missingness::Dict{Symbol, Float64}
-    copula::Any                   # BetaCopula or GaussianCopula, or nothing
+    copula::C                     # BetaCopula, GaussianCopula, or Nothing
     copula_columns::Vector{Symbol}
     n_original::Int
     identifier_columns::Vector{Symbol}
-    identifier_fills::Dict{Symbol, Any}   # column => fill spec (see §4.3)
+    identifier_fills::Dict{Symbol, FillSpec}
+    materializer::M
     rng::AbstractRNG
 end
 
@@ -254,6 +274,7 @@ function DataMimic.fit(
     privacy::Union{Nothing, PrivacyBudget} = nothing,
     hints::Vector{ColumnHint}              = ColumnHint[],
     identifiers::Vector{Symbol}            = Symbol[],
+    fill::Dict{Symbol, FillSpec}            = Dict{Symbol, FillSpec}(),
     rng::AbstractRNG                       = Random.default_rng(),
 ) -> AbstractFittedModel
 ```
@@ -265,10 +286,11 @@ function DataMimic.fit(
 3. Determine identifier columns — the union of:
    - Columns named in `identifiers`.
    - Columns tagged `ColumnHint(kind=:identifier)` in `hints`.
-   - **Auto-detected:** unique string columns where the number of distinct
-     values is ≥ 90% of `N` (high-cardinality heuristic). A `@info` message
-     is logged when auto-detection fires so the user knows which columns
-     were excluded.
+   - **Auto-detected:** string or integer columns where the number of
+     distinct non-missing values is ≥ 90% of `N_nonmissing` for that
+     column (high-cardinality heuristic). A `@info` message is logged
+     when auto-detection fires so the user knows which columns were
+     excluded.
 4. For each **non-identifier** column: detect type (or use `hints`), profile
    missingness, fit marginal.
 5. **Privacy / generator compatibility check:**
@@ -308,19 +330,9 @@ statistical signal. DataMimic **excludes them from the statistical model**
 entirely — they are never fed to the copula, marginal fitter, or any
 engine.
 
-**In the output**, identifier columns are handled by a **fill spec**
-passed at `fit` time:
-
-```julia
-function DataMimic.fit(
-    generator, table;
-    # ... other kwargs ...
-    identifiers::Vector{Symbol} = Symbol[],
-    fill::Dict{Symbol} = Dict{Symbol, Any}(),
-)
-```
-
-The `fill` dict maps identifier column names to replacement strategies:
+**In the output**, identifier columns are handled by the `fill` kwarg
+on `fit()` (see §4.1 for the full signature). The `fill` dict maps
+identifier column names to replacement strategies:
 
 | Fill value | Behavior | Example output |
 |------------|----------|----------------|
@@ -403,18 +415,27 @@ without Lux), `fit` throws with a message telling the user which package to load
 DiffusionGenerator requires Lux.jl. Run `using Lux` before calling fit.
 ```
 
-During **Phase 1**, only public generators are available; `AutoGenerator` with
-a `PrivacyBudget` will error with:
+**Phase-gating:** During Phase 1, only `CopulaGenerator` is available.
+`AutoGenerator` enforces this:
 
-```
-Private generators are not yet implemented. They arrive in v2.0-beta (Phase 2).
-```
+- With a `PrivacyBudget`:
+  ```
+  Private generators are not yet implemented. They arrive in v2.0-beta (Phase 2).
+  ```
+- When dispatch would select `DiffusionGenerator` (the `D > 30` or
+  `N > 100k` non-private path):
+  ```
+  DiffusionGenerator is not yet implemented. Use CopulaGenerator() directly,
+  or wait for v2.0-rc (Phase 3).
+  ```
+  In Phase 1, `AutoGenerator` with no privacy always resolves to
+  `CopulaGenerator(:beta)` regardless of `D` or `N`.
 
 ---
 
 ## 6. Evaluation Suite — `DataMimic.Evaluate` (Phase 4)
 
-A submodule providing three standard metrics. All use lightweight
+A submodule providing six standard metrics. All use lightweight
 dependencies already in the core dep tree or `DecisionTree.jl` (6 deps,
 all stdlib-level). No heavy ML framework required.
 
@@ -443,7 +464,7 @@ and a random forest is a standard TSTR baseline.
   exact matches (DCR = 0).
 - **Deps:** `StatsBase`, `LinearAlgebra` (already in core).
 
-### 6.3 `utility_tstr(real, synth, target; model=...) -> NamedTuple`
+### 6.3 `utility_tstr(real, synth, target; n_trees=100) -> NamedTuple`
 
 - Trains a `RandomForestClassifier` or `RandomForestRegressor` from
   `DecisionTree.jl` on `synth`, evaluates on held-out `real`.
@@ -455,6 +476,40 @@ and a random forest is a standard TSTR baseline.
   train/evaluate loop with any ML framework.
 - **Deps:** `DecisionTree.jl` (6 deps, all stdlib-level). Light enough
   to be a direct dependency rather than a package extension.
+
+### 6.4 `jensen_shannon(real, synth) -> NamedTuple`
+
+- Per-column **Jensen–Shannon divergence** for both continuous and
+  categorical columns.
+- Continuous columns are discretized into equal-width bins (default 50)
+  before computing JSD; categorical columns use observed level
+  frequencies directly.
+- JSD is bounded [0, log(2)] and symmetrized — more interpretable than
+  TVD for comparing distributions across datasets.
+- Returns per-column JSD scores, the mean, and an aggregate.
+- **Deps:** `StatsBase` (already in core).
+
+### 6.5 `pairwise_marginal_error(real, synth; order=2) -> NamedTuple`
+
+- Measures **2-way (or 3-way) contingency table error** between real
+  and synthetic data.
+- All columns are discretized (continuous → equal-width bins, categorical
+  → levels), then every `order`-way combination of columns is compared
+  via Total Variation Distance over the joint distribution.
+- Returns per-pair TVD scores, the mean, and the worst-case pair — this
+  directly validates MSTGenerator's core claim of preserving low-order
+  marginal structure.
+- **Deps:** `StatsBase` (already in core).
+
+### 6.6 `privacy_utility_sweep(generator, table, epsilons, metric_fn; kw...) -> Vector{NamedTuple}`
+
+- Runs a **privacy–utility curve**: fits and samples at each ε in
+  `epsilons`, evaluating with `metric_fn` at each point.
+- `metric_fn(real, synth)` can be any evaluation function
+  (`fidelity_score`, `jensen_shannon`, etc.).
+- Returns a vector of `(; epsilon, metric_result)` tuples — one per ε.
+- Standard sweep values: `[0.1, 0.5, 1.0, 5.0, 10.0]`.
+- **Deps:** None beyond what the chosen metric and generator require.
 
 ---
 
@@ -527,17 +582,24 @@ DataMimic/
 |-----------|----------|
 | `!Tables.istable(input)` | `ArgumentError` |
 | Zero rows or zero columns | `ArgumentError` |
+| All columns are identifiers (zero statistical columns) | `ArgumentError("No statistical columns remain after excluding identifiers.")` |
 | `identifiers` names a column not in the table | `ArgumentError` |
-| `fill` key is not in `identifiers` | `ArgumentError("fill key :foo is not an identifier column")` |
+| `fill` key is not in resolved identifier set | `ArgumentError("fill key :foo is not an identifier column")` |
+| `CopulaGenerator(copula_type)` with invalid symbol | `ArgumentError("copula_type must be :beta or :gaussian, got :foo")` |
+| `MSTGenerator(order)` with `order ∉ {2, 3}` | `ArgumentError("max_marginal_order must be 2 or 3, got 5")` |
+| `DiffusionGenerator(epochs=0)` or `batch_size=0` | `ArgumentError("epochs must be positive")` |
 | `AbstractPublicGenerator` + `PrivacyBudget` | `ArgumentError("CopulaGenerator does not support privacy; use a private generator or remove the privacy budget.")` |
 | `AbstractPrivateGenerator` + `privacy === nothing` | `ArgumentError("MSTGenerator requires a PrivacyBudget.")` |
 | Extension engine not loaded | `ErrorException` with `using Lux` instructions |
+| Phase 1 `AutoGenerator` + `PrivacyBudget` | `ErrorException("Private generators are not yet implemented.")` |
+| Phase 1 `AutoGenerator` resolves to `DiffusionGenerator` | `ErrorException("DiffusionGenerator is not yet implemented. Use CopulaGenerator() directly.")` |
 | `sample(model, n)` with `n < 1` | `ArgumentError` |
 | `n > 10 × n_original` | `@warn` (empirical marginals will repeat) |
 | Entirely-missing column | `@warn`, treated as constant(`missing`) |
 | `ColumnHint` names a column not in the table | `ArgumentError` |
+| `ColumnHint.levels` does not cover all observed values | `@warn` listing uncovered values; uncovered values excluded from marginal |
 | Deserialized model version mismatch | `ErrorException` with upgrade instructions |
-| Auto-detected identifier column | `@info("Column :foo auto-detected as identifier (N_unique/N = 0.98); excluding from model. Pass hints to override.")` |
+| Auto-detected identifier column | `@info("Column :foo auto-detected as identifier (N_unique/N_nonmissing = 0.98); excluding from model. Pass hints to override.")` |
 
 ---
 
@@ -657,3 +719,14 @@ depends on it so implementers know which papers to read for which phase.
   Conditional GANs." arXiv:1706.02633, 2017.
   — Formalizes the TSTR (Train on Synthetic, Test on Real) evaluation
   protocol. Used by `utility_tstr`. `Phase 4`
+
+- **[Lin 1991]** Lin, J. "Divergence Measures Based on the Shannon
+  Entropy." *IEEE Transactions on Information Theory*, 37(1), 1991.
+  — Defines the Jensen–Shannon divergence. Used by `jensen_shannon`.
+  `Phase 4`
+
+- **[McKenna et al. 2019]** McKenna, R., Miklau, G., Sheldon, D.
+  "Graphical-model based estimation and inference for differential
+  privacy." *ICML 2019*.
+  — Introduces pairwise marginal error as a key evaluation metric for
+  DP synthesizers. Used by `pairwise_marginal_error`. `Phase 4`

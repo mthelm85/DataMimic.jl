@@ -1,139 +1,268 @@
-using DataFrames
-using StatsBase
-using Copulas
+# ─── Privacy Validation ──────────────────────────────────────────────────────
 
-# ─── Marginal fitting ────────────────────────────────────────────────────────
-
-# nm       — pre-collected non-missing values (avoids a redundant column scan)
-# col_type — detected column type
-# T        — non-missing eltype of the original column
-function _fit_marginal(nm::Vector, col_type::Symbol, T::Type)
-    if col_type == :constant
-        val = isempty(nm) ? missing : first(nm)
-        return ConstantMarginal(val)
-
-    elseif col_type in (:continuous, :integer)
-        # sort! on the broadcasted copy — one allocation, sorted in-place.
-        sorted = sort!(Float64.(nm))
-        return EmpiricalMarginal(sorted, T)
-
-    else  # :categorical or :binary
-        # countmap is a single O(n) pass; the old [count(==(l), nm) for l in lvls]
-        # was O(n × k) where k is the number of unique levels.
-        cm    = StatsBase.countmap(nm)
-        lvls  = collect(keys(cm))
-        probs = Float64.(collect(values(cm)))
-        probs ./= sum(probs)
-        return CategoricalMarginal(lvls, probs)
+function _validate_privacy(gen::AbstractPublicGenerator, privacy)
+    if privacy !== nothing
+        name = nameof(typeof(gen))
+        throw(ArgumentError(
+            "$name does not support privacy; " *
+            "use a private generator or remove the privacy budget."))
     end
 end
 
-# ─── Main fit function ────────────────────────────────────────────────────────
+function _validate_privacy(gen::AbstractPrivateGenerator, privacy)
+    if privacy === nothing
+        name = nameof(typeof(gen))
+        throw(ArgumentError("$name requires a PrivacyBudget."))
+    end
+end
+
+function _validate_privacy(gen::DiffusionGenerator, privacy)
+    if gen.dp && privacy === nothing
+        throw(ArgumentError(
+            "DiffusionGenerator with dp=true requires a PrivacyBudget."))
+    end
+    if !gen.dp && privacy !== nothing
+        throw(ArgumentError(
+            "DiffusionGenerator with dp=false does not support privacy; " *
+            "set dp=true or remove the privacy budget."))
+    end
+end
+
+function _validate_privacy(::AutoGenerator, privacy)
+    # Handled in the AutoGenerator fit method
+end
+
+# ─── AutoGenerator ───────────────────────────────────────────────────────────
 
 """
-    fit(df::DataFrame; scramble=Symbol[]) -> SynthModel
+    fit(::AutoGenerator, table; kw...)
 
-Profile `df` and return a fitted `SynthModel`. No synthetic data is produced.
+Dispatch rules from PACKAGE_SPEC §5.
 
-Columns named in `scramble` are sampled normally but have their characters
-(strings) or digits (integers) randomly scrambled before appearing in the
-synthetic output, so no real identifier value is ever directly exposed.
+**Non-private**:
+- D ≤ 30            →  `CopulaGenerator(:beta)`
+- D > 30 or N > 100k →  `DiffusionGenerator(dp=false)`
+
+**Private**:
+- N < 20k, categorical fraction > 50%  →  `MSTGenerator(2)`
+- N < 20k, categorical fraction ≤ 50%  →  `DPCopulaGenerator()`
+- N ≥ 20k, D > 30                     →  `DiffusionGenerator(dp=true)`
+- N ≥ 20k, D ≤ 30                     →  `MSTGenerator(2)`
 """
-function fit(df::DataFrame; scramble::Vector{Symbol} = Symbol[])
-    nrows, ncols = size(df)
-    nrows == 0 && error("Input DataFrame has zero rows.")
-    ncols == 0 && error("Input DataFrame has zero columns.")
+function fit(gen::AutoGenerator, table;
+             privacy::Union{Nothing, PrivacyBudget} = nothing,
+             hints::Vector{ColumnHint}              = ColumnHint[],
+             identifiers::Vector{Symbol}            = Symbol[],
+             fill                                   = Dict{Symbol, FillSpec}(),
+             rng::AbstractRNG                       = Random.default_rng())
 
-    col_names   = Symbol.(names(df))
-    col_types   = Symbol[]
-    marginals   = Dict{Symbol, Any}()
-    missingness = Dict{Symbol, Float64}()
+    # ── Inspect table for dispatch decision ──────────────────────────────
+    Tables.istable(table) ||
+        throw(ArgumentError("Input must be a Tables.jl-compatible table."))
 
-    # Validate scramble list up front.
-    unknown = setdiff(scramble, col_names)
-    isempty(unknown) || error("Columns not found in DataFrame: $unknown")
+    cols      = Tables.columns(table)
+    col_names = collect(Symbol, Tables.columnnames(cols))
+    N         = length(Tables.getcolumn(cols, first(col_names)))
+
+    nm_cache       = Dict{Symbol, Vector}()
+    basetype_cache = Dict{Symbol, Type}()
+    for name in col_names
+        col = Tables.getcolumn(cols, name)
+        nm_cache[name]       = _nonmissing(col)
+        basetype_cache[name] = _basetype(col)
+    end
+
+    id_set    = _resolve_identifiers(col_names, identifiers, hints,
+                                      nm_cache, basetype_cache)
+    stat_cols = filter(n -> !(n in id_set), col_names)
+    D         = length(stat_cols)
+
+    if privacy === nothing
+        # ── Non-private dispatch ────────────────────────────────────────
+        selected = if D > 30 || N > 100_000
+            DiffusionGenerator(; dp = false)
+        else
+            CopulaGenerator(:beta)
+        end
+    else
+        # ── Private dispatch ────────────────────────────────────────────
+        hint_dict = Dict(h.name => h for h in hints)
+        n_cat = 0
+        for name in stat_cols
+            h = get(hint_dict, name, nothing)
+            kind = if h !== nothing && h.kind != :identifier
+                h.kind
+            else
+                _detect_column_type(nm_cache[name], basetype_cache[name])
+            end
+            kind in (:categorical, :binary) && (n_cat += 1)
+        end
+        cat_frac = D > 0 ? n_cat / D : 0.0
+
+        selected = if N < 20_000
+            cat_frac > 0.5 ? MSTGenerator(2) : DPCopulaGenerator()
+        else   # N ≥ 20k
+            D > 30 ? DiffusionGenerator(; dp = true) : MSTGenerator(2)
+        end
+    end
+
+    return fit(selected, table;
+               privacy = privacy, hints = hints,
+               identifiers = identifiers, fill = fill, rng = rng)
+end
+
+# ─── Main fit ────────────────────────────────────────────────────────────────
+
+"""
+    fit(generator::AbstractGenerator, table; kw...) -> AbstractFittedModel
+
+Fit a synthetic data model to `table` using the specified generator.
+
+# Keywords
+- `privacy::Union{Nothing, PrivacyBudget}=nothing` — required for private generators
+- `hints::Vector{ColumnHint}=ColumnHint[]` — column type overrides
+- `identifiers::Vector{Symbol}=Symbol[]` — columns to exclude from the model
+- `fill=Dict{Symbol,FillSpec}()` — fill specs for identifier columns in output
+- `rng::AbstractRNG=Random.default_rng()` — random number generator
+"""
+function fit(gen::AbstractGenerator, table;
+             privacy::Union{Nothing, PrivacyBudget} = nothing,
+             hints::Vector{ColumnHint}              = ColumnHint[],
+             identifiers::Vector{Symbol}            = Symbol[],
+             fill                                   = Dict{Symbol, FillSpec}(),
+             rng::AbstractRNG                       = Random.default_rng())
+
+    # ── 1. Validate input table ──────────────────────────────────────────
+    Tables.istable(table) ||
+        throw(ArgumentError("Input must be a Tables.jl-compatible table."))
+
+    cols = Tables.columns(table)
+    col_names = collect(Symbol, Tables.columnnames(cols))
+    isempty(col_names) &&
+        throw(ArgumentError("Input table has zero columns."))
+
+    first_col = Tables.getcolumn(cols, first(col_names))
+    nrows = length(first_col)
+    nrows == 0 &&
+        throw(ArgumentError("Input table has zero rows."))
+
+    mat = Tables.materializer(table)
+
+    # ── 2. Validate hint and identifier column names ─────────────────────
+    for h in hints
+        h.name in col_names ||
+            throw(ArgumentError(
+                "ColumnHint names column :$(h.name) which is not in the table."))
+    end
+    for id in identifiers
+        id in col_names ||
+            throw(ArgumentError(
+                "identifiers names column :$id which is not in the table."))
+    end
+
+    # ── 3. Collect per-column metadata ───────────────────────────────────
+    nm_cache       = Dict{Symbol, Vector}()
+    basetype_cache = Dict{Symbol, Type}()
 
     for name in col_names
-        col = df[!, name]
-        n   = length(col)
-
-        # Collect non-missing values once and derive everything from that.
-        nm     = _nonmissing(col)
-        p_miss = (n - length(nm)) / n   # no extra scan over the column
-        missingness[name] = p_miss
-
-        if p_miss == 1.0
-            @warn "Column $name is entirely missing; treating as Constant(missing)."
-        end
-
-        T     = _basetype(col)
-        ctype = _detect_column_type(nm, T)   # reuses nm
-        push!(col_types, ctype)
-        marginals[name] = _fit_marginal(nm, ctype, T)   # reuses nm
+        col = Tables.getcolumn(cols, name)
+        nm_cache[name]       = _nonmissing(col)
+        basetype_cache[name] = _basetype(col)
     end
 
-    # Warn if a scrambled column has a type that scrambling won't meaningfully obscure.
-    for cname in scramble
-        idx   = findfirst(==(cname), col_names)
-        ctype = col_types[idx]
-        if ctype == :constant
-            @warn "Scrambled column $cname is :constant (single value); " *
-                  "scrambling may not change the output."
-        elseif ctype == :continuous
-            @warn "Scrambled column $cname is :continuous (Float64/Float32); " *
-                  "digit-scrambling of floats may produce unexpected values."
-        end
+    # ── 4. Resolve identifiers ───────────────────────────────────────────
+    id_set = _resolve_identifiers(col_names, identifiers, hints,
+                                   nm_cache, basetype_cache)
+
+    stat_cols = filter(n -> !(n in id_set), col_names)
+    isempty(stat_cols) &&
+        throw(ArgumentError(
+            "No statistical columns remain after excluding identifiers."))
+
+    # ── 5. Validate fill keys ────────────────────────────────────────────
+    fill_dict = Dict{Symbol, FillSpec}()
+    for (k, v) in pairs(fill)
+        sk = Symbol(k)
+        sk in id_set ||
+            throw(ArgumentError("fill key :$sk is not an identifier column."))
+        fill_dict[sk] = v
     end
 
-    # Identify numeric columns for the copula
-    numeric_mask = [t in (:continuous, :integer) for t in col_types]
-    copula_cols  = col_names[numeric_mask]
+    # ── 6. Validate privacy / generator compatibility ────────────────────
+    _validate_privacy(gen, privacy)
 
-    copula = _fit_copula(df, col_names, col_types, copula_cols)
-
-    return SynthModel(col_names, col_types, marginals, missingness,
-                      copula, copula_cols, nrows, scramble)
+    # ── 7. Dispatch to engine ────────────────────────────────────────────
+    return _fit_engine(gen, cols, col_names, id_set, fill_dict,
+                       hints, nm_cache, basetype_cache, nrows, mat, rng,
+                       privacy)
 end
 
-# ─── Copula fitting ───────────────────────────────────────────────────────────
+# ─── CopulaGenerator engine integration ─────────────────────────────────────
 
-function _fit_copula(df, col_names, col_types, copula_cols)
-    d = length(copula_cols)
+function _fit_engine(gen::CopulaGenerator, cols, col_names, id_set, fill_dict,
+                     hints, nm_cache, basetype_cache, nrows, mat, rng,
+                     privacy)
+    hint_dict    = Dict(h.name => h for h in hints)
+    col_kinds    = Symbol[]
+    marginals    = Dict{Symbol, Marginal}()
+    miss         = Dict{Symbol, Float64}()
+    copula_cols  = Symbol[]
 
-    if d == 0
-        @warn "No numeric columns found; all columns are categorical/constant. " *
-              "Falling back to fully independent sampling."
-        return nothing
-    end
-
-    if d == 1
-        @warn "Only one numeric column present; copula fitting skipped."
-        return nothing
-    end
-
-    # Build a Float64 matrix (n_rows × d) with NaN for missing values.
-    n = nrow(df)
-    X = Matrix{Float64}(undef, n, d)
-    for (j, cname) in enumerate(copula_cols)
-        col = df[!, cname]
-        for i in 1:n
-            v = col[i]
-            X[i, j] = ismissing(v) ? NaN : Float64(v)
+    for name in col_names
+        if name in id_set
+            push!(col_kinds, :identifier)
+            continue
         end
+
+        nm = nm_cache[name]
+        T  = basetype_cache[name]
+        n  = length(Tables.getcolumn(cols, name))
+        p_miss = (n - length(nm)) / n
+        miss[name] = p_miss
+
+        if p_miss == 1.0
+            @warn "Column :$name is entirely missing; treating as Constant(missing)."
+        end
+
+        # Determine kind — hint overrides auto-detection
+        hint = get(hint_dict, name, nothing)
+        if hint !== nothing && hint.kind != :identifier
+            kind = hint.kind
+            if hint.levels !== nothing
+                observed  = unique(nm)
+                uncovered = setdiff(observed, hint.levels)
+                if !isempty(uncovered)
+                    @warn "ColumnHint for :$name has levels that don't cover " *
+                          "observed values: $uncovered; these values will be " *
+                          "excluded from the marginal."
+                end
+            end
+        else
+            kind = _detect_column_type(nm, T)
+        end
+        push!(col_kinds, kind)
+
+        if kind in (:continuous, :integer)
+            push!(copula_cols, name)
+        end
+
+        marginals[name] = _fit_marginal(nm, kind, T; hint = hint)
     end
 
-    # Complete cases across all numeric columns.
-    complete = vec(.!any(isnan.(X), dims=2))
-    Xc = X[complete, :]   # (n_complete × d)
+    copula = _fit_copula(cols, copula_cols, nrows, gen.copula_type)
 
-    if size(Xc, 1) < 2
-        @warn "Fewer than 2 complete cases for copula fitting; using independent sampling."
-        return nothing
-    end
+    id_cols = [name for name in col_names if name in id_set]
 
-    # Copulas.jl convention: data matrix is (d × n_obs).
-    # pseudos computes scaled ranks column-wise (per variable).
-    U = Copulas.pseudos(Matrix(Xc'))   # (d × n_complete)
+    return FittedCopulaModel(
+        col_names, col_kinds, marginals, miss,
+        copula, copula_cols, nrows,
+        id_cols, fill_dict, mat, rng,
+    )
+end
 
-    return StatsBase.fit(BetaCopula, U)
+# ─── Fallback for DiffusionGenerator (extension not loaded) ──────────────────
+
+function _fit_engine(::DiffusionGenerator, args...)
+    error("DiffusionGenerator requires Lux.jl. " *
+          "Run `using Lux, Zygote` before calling fit.")
 end

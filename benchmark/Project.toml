@@ -1,0 +1,14 @@
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+DataMimic = "cb7d7795-550a-4968-bbdc-2a75efce1373"
+Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
+Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
+[sources]
+DataMimic = {path = ".."}
