@@ -88,20 +88,24 @@ Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
     dp::Bool           = false
     epochs::Int        = 100
     batch_size::Int    = 512
-    hidden_dim::Int    = 0     # 0 = auto: min(256, max(64, 4·d_features))
+    hidden_dim::Int    = 0      # 0 = auto: min(256, max(64, 4·d_features))
     n_blocks::Int      = 4
     embed_dim::Int     = 128
     dropout::Float64   = 0.0
+    lr::Float64        = 1e-3   # peak learning rate
+    lr_warmup::Int     = 0      # linear warmup epochs (0 = no warmup)
 
     function DiffusionGenerator(dp, epochs, batch_size, hidden_dim, n_blocks,
-                                embed_dim, dropout)
+                                embed_dim, dropout, lr, lr_warmup)
         epochs > 0     || throw(ArgumentError("epochs must be positive, got $epochs"))
         batch_size > 0 || throw(ArgumentError("batch_size must be positive, got $batch_size"))
         hidden_dim >= 0 || throw(ArgumentError("hidden_dim must be non-negative, got $hidden_dim"))
         n_blocks > 0   || throw(ArgumentError("n_blocks must be positive, got $n_blocks"))
         embed_dim > 0  || throw(ArgumentError("embed_dim must be positive, got $embed_dim"))
         0.0 <= dropout < 1.0 || throw(ArgumentError("dropout must be in [0,1), got $dropout"))
-        new(dp, epochs, batch_size, hidden_dim, n_blocks, embed_dim, dropout)
+        lr > 0         || throw(ArgumentError("lr must be positive, got $lr"))
+        lr_warmup >= 0 || throw(ArgumentError("lr_warmup must be non-negative, got $lr_warmup"))
+        new(dp, epochs, batch_size, hidden_dim, n_blocks, embed_dim, dropout, lr, lr_warmup)
     end
 end
 

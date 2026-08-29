@@ -43,7 +43,7 @@ a later phase.
 | **REQ-TYP-007** | `AutoGenerator` shall subtype `AbstractGenerator` and carry no configuration fields. | Must | 1 |
 | **REQ-TYP-008** | `MSTGenerator` shall subtype `AbstractPrivateGenerator` and accept `max_marginal_order::Int` (default `2`). | Done | 2 |
 | **REQ-TYP-009** | `DPCopulaGenerator` shall subtype `AbstractPrivateGenerator` with no configuration fields. | Done | 2 |
-| **REQ-TYP-010** | `DiffusionGenerator` shall subtype `AbstractGenerator` (not Public or Private) and accept `dp::Bool`, `epochs::Int`, `batch_size::Int`. | Done | 3 |
+| **REQ-TYP-010** | `DiffusionGenerator` shall subtype `AbstractGenerator` (not Public or Private) and accept `dp::Bool`, `epochs::Int`, `batch_size::Int`, `hidden_dim::Int`, `n_blocks::Int`, `embed_dim::Int`, `dropout::Float64`, `lr::Float64`, `lr_warmup::Int`. | Done | 3 |
 | **REQ-TYP-011** | `ColumnHint` shall accept `name::Symbol`, `kind::Symbol`, and optional `levels::Vector`. | Must | 1 |
 | **REQ-TYP-012** | Valid `ColumnHint` `kind` values shall be `:continuous`, `:integer`, `:categorical`, `:binary`, `:constant`, `:identifier`. | Must | 1 |
 
@@ -221,6 +221,8 @@ a later phase.
 | **REQ-DIF-011** | WHEN training completes on GPU, the `LuxExt` shall move trained parameters back to CPU before storing them in `FittedDiffusionModel`. | Done | 4b |
 | **REQ-DIF-012** | WHEN sampling from a `FittedDiffusionModel`, the `LuxExt` shall move the model to the available device for the denoising loop, then move results back to CPU for post-processing. | Done | 4b |
 | **REQ-DIF-013** | GPU support shall not introduce any new dependencies on DataMimic — `LuxCUDA` is the user's opt-in, detected at runtime. | Done | 4b |
+| **REQ-DIF-014** | `DiffusionGenerator` shall use cosine-decay learning rate scheduling with optional linear warmup, controlled by `lr` (peak rate) and `lr_warmup` (warmup epochs). | Done | 4b |
+| **REQ-DIF-015** | `DiffusionGenerator` shall expose network architecture hyperparameters (`hidden_dim`, `n_blocks`, `embed_dim`, `dropout`) for user tuning, with sensible defaults matching TabDDPM [Kotelnikov et al. 2023]. | Done | 4b |
 
 ---
 

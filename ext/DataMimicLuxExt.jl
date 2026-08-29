@@ -516,14 +516,36 @@ Move `x` to the given device. For arrays, NamedTuples, and Lux states.
 _to_device(x, dev) = dev(x)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 9. Standard Training Loop
+# 9. Learning Rate Schedule
+# ═══════════════════════════════════════════════════════════════════════════
+
+"""
+Cosine-decay learning rate with optional linear warmup.
+
+Returns the LR for the given epoch (1-indexed):
+- Epochs 1..warmup: linearly ramp from lr_max/10 to lr_max
+- Epochs warmup+1..total: cosine decay from lr_max to lr_max/100
+"""
+function _cosine_lr(epoch::Int, total_epochs::Int, lr_max::Float64, warmup::Int)
+    if warmup > 0 && epoch <= warmup
+        # Linear warmup from lr_max/10 to lr_max
+        return lr_max * (0.1 + 0.9 * (epoch - 1) / max(warmup - 1, 1))
+    end
+    lr_min = lr_max / 100
+    decay_epoch = epoch - warmup
+    decay_total = total_epochs - warmup
+    return lr_min + 0.5 * (lr_max - lr_min) * (1 + cos(π * decay_epoch / decay_total))
+end
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 10. Standard Training Loop
 # ═══════════════════════════════════════════════════════════════════════════
 
 function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
                           st_bb, st_emb,
                           X_num, X_cat_oh, cat_indices,
                           betas, alphas_cumprod, cat_dims, d_num,
-                          epochs, batch_size, rng, dev)
+                          epochs, batch_size, lr, lr_warmup, rng, dev)
     T     = length(betas)
     nrows = size(X_num, 2) > 0 ? size(X_num, 2) : size(X_cat_oh, 2)
 
@@ -537,7 +559,7 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
     ps_all    = _to_device((; backbone = ps_bb, emb = ps_emb), dev)
     st_bb     = _to_device(st_bb, dev)
     st_emb    = _to_device(st_emb, dev)
-    opt_state = Optimisers.setup(Optimisers.Adam(1f-3), ps_all)
+    opt_state = Optimisers.setup(Optimisers.Adam(Float32(lr)), ps_all)
 
     t_start    = time()
     epoch_loss = 0.0
@@ -547,6 +569,10 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
     report_every = max(1, epochs ÷ 20)
 
     for epoch in 1:epochs
+        # Cosine LR schedule with optional warmup
+        cur_lr = Float32(_cosine_lr(epoch, epochs, lr, lr_warmup))
+        Optimisers.adjust!(opt_state; eta = cur_lr)
+
         epoch_loss = 0.0
         n_batches  = 0
         perm = Random.randperm(rng, nrows)
@@ -596,7 +622,7 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
             avg_loss = epoch_loss / max(n_batches, 1)
             elapsed  = time() - t_start
             eta      = elapsed / epoch * (epochs - epoch)
-            @info "Epoch $(epoch)/$(epochs)  loss=$(round(avg_loss; digits=4))  elapsed=$(round(Int, elapsed))s  ETA=$(round(Int, eta))s"
+            @info "Epoch $(epoch)/$(epochs)  loss=$(round(avg_loss; digits=4))  lr=$(round(cur_lr; sigdigits=3))  elapsed=$(round(Int, elapsed))s  ETA=$(round(Int, eta))s"
         end
     end
 
@@ -604,7 +630,7 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 10. DP-SGD Training Loop
+# 11. DP-SGD Training Loop
 # ═══════════════════════════════════════════════════════════════════════════
 
 """Log-sum-exp with numerical stability."""
@@ -664,7 +690,7 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
                        st_bb, st_emb,
                        X_num, X_cat_oh, cat_indices,
                        betas, alphas_cumprod, cat_dims, d_num,
-                       epochs, batch_size, privacy, rng, dev)
+                       epochs, batch_size, lr, lr_warmup, privacy, rng, dev)
     T     = length(betas)
     nrows = size(X_num, 2) > 0 ? size(X_num, 2) : size(X_cat_oh, 2)
 
@@ -698,12 +724,16 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
     ps_all    = _to_device((; backbone = ps_bb, emb = ps_emb), dev)
     st_bb     = _to_device(st_bb, dev)
     st_emb    = _to_device(st_emb, dev)
-    opt_state = Optimisers.setup(Optimisers.Adam(1f-3), ps_all)
+    opt_state = Optimisers.setup(Optimisers.Adam(Float32(lr)), ps_all)
 
     t_start      = time()
     report_every = max(1, epochs ÷ 20)
 
     for epoch in 1:epochs
+        # Cosine LR schedule with optional warmup
+        cur_lr = Float32(_cosine_lr(epoch, epochs, lr, lr_warmup))
+        Optimisers.adjust!(opt_state; eta = cur_lr)
+
         epoch_loss = 0.0
         n_batches  = 0
         perm = Random.randperm(rng, nrows)
@@ -771,7 +801,7 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
             avg_loss = epoch_loss / max(n_batches, 1)
             elapsed  = time() - t_start
             eta      = elapsed / epoch * (epochs - epoch)
-            @info "DP-SGD Epoch $(epoch)/$(epochs)  loss=$(round(avg_loss; digits=4))  elapsed=$(round(Int, elapsed))s  ETA=$(round(Int, eta))s"
+            @info "DP-SGD Epoch $(epoch)/$(epochs)  loss=$(round(avg_loss; digits=4))  lr=$(round(cur_lr; sigdigits=3))  elapsed=$(round(Int, elapsed))s  ETA=$(round(Int, eta))s"
         end
     end
 
@@ -1007,13 +1037,15 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
             backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
             X_num, X_cat_oh, cat_indices,
             betas, alphas_cumprod, cat_dims_v, d_num,
-            gen.epochs, gen.batch_size, privacy, rng, gdev)
+            gen.epochs, gen.batch_size, gen.lr, gen.lr_warmup,
+            privacy, rng, gdev)
     else
         ps_bb, ps_emb, st_bb, st_emb = _train_standard!(
             backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
             X_num, X_cat_oh, cat_indices,
             betas, alphas_cumprod, cat_dims_v, d_num,
-            gen.epochs, gen.batch_size, rng, gdev)
+            gen.epochs, gen.batch_size, gen.lr, gen.lr_warmup,
+            rng, gdev)
     end
 
     # ── Move trained params back to CPU for storage / serialization ──
