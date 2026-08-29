@@ -8,7 +8,7 @@ projects = ["dev", "test", "benchmark"]
 
 [deps]
 Copulas = "ae264745-0b69-425e-9d9d-cf662c5eec93"
-DecisionTree = "7806a523-6efd-50cb-b5f6-3fa6f1930dbb"
+EvoTrees = "f6006082-12f8-11e9-0c9c-0d5d367ab1e5"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Optimisers = "3bd65402-5787-11e9-1adc-39752487f4e2"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
@@ -25,7 +25,7 @@ DataMimicLuxExt = ["Lux", "Zygote"]
 
 [compat]
 Copulas = "0.1"
-DecisionTree = "0.12"
+EvoTrees = "0.19"
 Lux = "1"
 Optimisers = "0.4"
 StatsBase = "0.34"

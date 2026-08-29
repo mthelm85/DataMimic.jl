@@ -1107,7 +1107,7 @@ using Lux, Zygote
         @testset "utility_tstr" begin
             @testset "classification" begin
                 tstr = utility_tstr(real_tbl, synth_tbl, :cat;
-                                    n_trees = 20)
+                                    nrounds = 20)
                 @test tstr isa NamedTuple
                 @test tstr.task == :classification
                 @test 0.0 ≤ tstr.synth_score ≤ 1.0
@@ -1117,7 +1117,7 @@ using Lux, Zygote
 
             @testset "regression" begin
                 tstr = utility_tstr(real_tbl, synth_tbl, :x;
-                                    n_trees = 20)
+                                    nrounds = 20)
                 @test tstr.task == :regression
                 @test tstr.synth_score ≥ 0.0  # RMSE
                 @test tstr.real_score ≥ 0.0

@@ -20,7 +20,7 @@ module Evaluate
 import Tables
 import StatsBase
 import LinearAlgebra
-import DecisionTree
+import EvoTrees
 import Random
 import Random: AbstractRNG
 

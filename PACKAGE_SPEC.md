@@ -26,7 +26,7 @@ Version 2.0 intentionally **breaks backward compatibility** with v1.x.
 | **Phase 1 — Foundation** | Type system (including `PrivacyBudget` struct), Tables.jl plumbing, `CopulaGenerator` (port from v1), identifier handling, column-type detection, `AutoGenerator` (public-only dispatch), serialization | v2.0-alpha |
 | **Phase 2 — Privacy** | `MSTGenerator`, `DPCopulaGenerator`, AutoGenerator private dispatch | v2.0-beta |
 | **Phase 3 — Deep Generative** | `DiffusionGenerator` (Lux extension): TabDDPM with multinomial diffusion for categoricals; non-private mode first, then DP-SGD | v2.0-rc |
-| **Phase 4 — Evaluation** | `DataMimic.Evaluate` submodule (fidelity, DCR, TSTR via DecisionTree.jl) | v2.0 |
+| **Phase 4 — Evaluation** | `DataMimic.Evaluate` submodule (fidelity, DCR, TSTR via EvoTrees.jl) | v2.0 |
 | **Phase 4b — Extended Evaluation & GPU** | Jensen–Shannon divergence, pairwise marginal error, privacy–utility sweep, GPU acceleration for DiffusionGenerator training and sampling | v2.0.1 |
 
 **Phase 3 detail — DiffusionGenerator:**  The core TabDDPM (noise schedule,
@@ -471,13 +471,13 @@ DiffusionGenerator requires Lux.jl. Run `using Lux` before calling fit.
 ## 6. Evaluation Suite — `DataMimic.Evaluate` (Phase 4)
 
 A submodule providing six standard metrics. All use lightweight
-dependencies already in the core dep tree or `DecisionTree.jl` (6 deps,
+dependencies already in the core dep tree or `EvoTrees.jl` (6 deps,
 all stdlib-level). No heavy ML framework required.
 
 **Why not MLJ.jl?** MLJ pulls in 24 direct dependencies (MLJBase,
 MLJModels, MLJTuning, MLJEnsembles, MLJTransforms, ScientificTypes,
 OpenML, ...) — most of which are irrelevant for TSTR evaluation.
-`DecisionTree.jl` provides random forests with a standalone API in 6
+`EvoTrees.jl` provides random forests with a standalone API in 6
 deps. Since TSTR compares "train on synth" vs. "train on real" using the
 *same* model class, consistency matters more than peak model performance,
 and a random forest is a standard TSTR baseline.
@@ -502,14 +502,14 @@ and a random forest is a standard TSTR baseline.
 ### 6.3 `utility_tstr(real, synth, target; n_trees=100) -> NamedTuple`
 
 - Trains a `RandomForestClassifier` or `RandomForestRegressor` from
-  `DecisionTree.jl` on `synth`, evaluates on held-out `real`.
+  `EvoTrees.jl` on `synth`, evaluates on held-out `real`.
 - Auto-detects classification vs. regression from the `target` column type.
 - Returns accuracy (classification) or RMSE (regression) for both
   synth-trained and real-trained models, plus the ratio.
 - Users who want TSTR with a different model can call `fidelity_score`
   and `privacy_dcr` for the statistical metrics and run their own
   train/evaluate loop with any ML framework.
-- **Deps:** `DecisionTree.jl` (6 deps, all stdlib-level). Light enough
+- **Deps:** `EvoTrees.jl` (6 deps, all stdlib-level). Light enough
   to be a direct dependency rather than a package extension.
 
 ### 6.4 `jensen_shannon(real, synth) -> NamedTuple`
@@ -570,7 +570,7 @@ DataMimic/
 │       ├── Evaluate.jl       # submodule root                         (Phase 4)
 │       ├── fidelity.jl
 │       ├── dcr.jl
-│       └── tstr.jl           # TSTR via DecisionTree.jl
+│       └── tstr.jl           # TSTR via EvoTrees.jl
 ├── ext/
 │   └── LuxExt.jl             # DiffusionGenerator engine              (Phase 3)
 ├── test/
@@ -598,7 +598,7 @@ DataMimic/
 | `Copulas.jl` | BetaCopula, GaussianCopula fitting |
 | `StatsBase.jl` | countmap, Weights, sampling |
 | `DataFrames.jl` | Direct dep — 95% of users will use it |
-| `DecisionTree.jl` | Random forests for TSTR evaluation (6 stdlib-level deps) |
+| `EvoTrees.jl` | Random forests for TSTR evaluation (6 stdlib-level deps) |
 | `Random` | RNG threading |
 | `Serialization` | Model save/load |
 | `LinearAlgebra` | Covariance, PSD projection (DP copula) |

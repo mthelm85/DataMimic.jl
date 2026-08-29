@@ -1,15 +1,17 @@
 # ─── utility_tstr ──────────────────────────────────────────────────────────
 #
-# REQ-EVL-007: Train RF on synth, evaluate on held-out real
+# REQ-EVL-007: Train on synth, evaluate on held-out real
 # REQ-EVL-008: Auto-detect classification vs regression
-# REQ-EVL-009: Return accuracy/RMSE for synth-trained and real-trained + ratio
+# REQ-EVL-009: Return accuracy/F1/RMSE for synth-trained and real-trained + ratio
 #
 # Reference: [Esteban et al. 2017] — TSTR protocol
+# Classifier: EvoTrees gradient boosted trees (comparable to CatBoost)
+# Metric: Macro-averaged F1 for classification (following TabDDPM [Kotelnikov et al. 2023])
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
 """
-Encode feature columns as a numeric matrix for DecisionTree.jl.
+Encode feature columns as a numeric matrix for EvoTrees.
 
 - Numeric columns → Float64 as-is (missing → column median).
 - Categorical columns → integer codes (missing → mode code).
@@ -82,30 +84,93 @@ function _extract_target(cols, target::Symbol, nrows::Int)
     end
 end
 
+"""
+Stratified train/test split: partition row indices so that each class
+appears in roughly the same proportion in both sets.
+"""
+function _stratified_split(y::Vector{String}, test_frac::Float64, rng::AbstractRNG)
+    n = length(y)
+    classes = unique(y)
+    train_idx = Int[]
+    test_idx  = Int[]
+    for cls in classes
+        cls_idx = findall(==(cls), y)
+        cls_idx = cls_idx[Random.randperm(rng, length(cls_idx))]
+        n_test = max(1, round(Int, length(cls_idx) * test_frac))
+        append!(test_idx,  cls_idx[1:n_test])
+        append!(train_idx, cls_idx[n_test+1:end])
+    end
+    return train_idx, test_idx
+end
+
+"""
+Macro-averaged F1 score: compute per-class precision, recall, F1 and
+average across all classes. Returns (f1_macro, accuracy).
+"""
+function _macro_f1(y_true::Vector{String}, y_pred::Vector{String})
+    classes = sort(unique(vcat(y_true, y_pred)))
+    n = length(y_true)
+    acc = count(y_true .== y_pred) / n
+
+    f1_sum = 0.0
+    for cls in classes
+        tp = count((y_true .== cls) .& (y_pred .== cls))
+        fp = count((y_true .!= cls) .& (y_pred .== cls))
+        fn = count((y_true .== cls) .& (y_pred .!= cls))
+
+        precision = (tp + fp) > 0 ? tp / (tp + fp) : 0.0
+        recall    = (tp + fn) > 0 ? tp / (tp + fn) : 0.0
+        f1 = (precision + recall) > 0 ? 2 * precision * recall / (precision + recall) : 0.0
+        f1_sum += f1
+    end
+
+    f1_macro = f1_sum / length(classes)
+    return f1_macro, acc
+end
+
 # ─── Public API ─────────────────────────────────────────────────────────────
 
 """
     utility_tstr(real, synth, target::Symbol;
-                 n_trees=100, rng=Random.default_rng()) -> NamedTuple
+                 test=nothing, test_frac=0.2, nrounds=200,
+                 max_depth=6, eta=0.05, nbins=64,
+                 rng=Random.default_rng()) -> NamedTuple
 
-Train-on-Synthetic, Test-on-Real evaluation using a random forest from
-`DecisionTree.jl`.
+Train-on-Synthetic, Test-on-Real evaluation using gradient boosted trees
+from `EvoTrees.jl`.
 
 1. Train a model on `synth` features → `synth` target.
-2. Evaluate on `real` features → `real` target.
-3. Also train on `real` → `real` (baseline) for comparison.
+2. Evaluate on held-out real data → real target.
+3. Also train on real train data → evaluate on the same held-out set (baseline).
+
+If `test` is provided (a Tables.jl-compatible table), it is used as the
+held-out test set. Otherwise, `real` is split into train/test using
+`test_frac` (default 0.2) with stratified sampling for classification.
+
+For classification, reports both macro-averaged F1 score (following the
+TabDDPM evaluation protocol [Kotelnikov et al. 2023]) and accuracy.
+The ratio is computed from F1 scores.
 
 Returns a `NamedTuple` with:
 - `task`: `:classification` or `:regression`
-- `synth_score`: accuracy (classification) or RMSE (regression) of synth-trained model
-- `real_score`: accuracy / RMSE of real-trained model (baseline)
+- `synth_score`: F1 (classification) or RMSE (regression) of synth-trained model
+- `real_score`: F1 / RMSE of real-trained model (baseline)
 - `ratio`: `synth_score / real_score` — closer to 1.0 is better
-           (for classification: higher is better; for regression: lower is better)
+- `synth_accuracy`, `real_accuracy`: (classification only) raw accuracy scores
 """
 function utility_tstr(real, synth, target::Symbol;
-                      n_trees::Int = 100)
+                      test = nothing,
+                      test_frac::Float64 = 0.2,
+                      nrounds::Int = 200,
+                      max_depth::Int = 6,
+                      eta::Float64 = 0.05,
+                      nbins::Int = 64,
+                      rng::AbstractRNG = Random.default_rng())
     Tables.istable(real)  || throw(ArgumentError("real must be a Tables.jl table"))
     Tables.istable(synth) || throw(ArgumentError("synth must be a Tables.jl table"))
+    if test !== nothing
+        Tables.istable(test) || throw(ArgumentError("test must be a Tables.jl table"))
+    end
 
     r_cols = Tables.columns(real)
     s_cols = Tables.columns(synth)
@@ -126,45 +191,93 @@ function utility_tstr(real, synth, target::Symbol;
     n_real  = length(Tables.getcolumn(r_cols, first(r_names)))
     n_synth = length(Tables.getcolumn(s_cols, first(s_names)))
 
-    # Encode features and target
-    X_real  = _encode_features(r_cols, feature_names, n_real;  ref_cols = r_cols)
+    # Encode synth features and target (always uses all synth rows for training)
     X_synth = _encode_features(s_cols, feature_names, n_synth; ref_cols = r_cols)
-    y_real, task  = _extract_target(r_cols, target, n_real)
-    y_synth, _    = _extract_target(s_cols, target, n_synth)
+    y_synth, task = _extract_target(s_cols, target, n_synth)
+
+    if test !== nothing
+        # ── External held-out test set ─────────────────────────────────
+        t_cols  = Tables.columns(test)
+        n_test  = length(Tables.getcolumn(t_cols, first(Tables.columnnames(t_cols))))
+        X_train = _encode_features(r_cols, feature_names, n_real; ref_cols = r_cols)
+        X_test  = _encode_features(t_cols, feature_names, n_test; ref_cols = r_cols)
+        y_train, _ = _extract_target(r_cols, target, n_real)
+        y_test, _  = _extract_target(t_cols, target, n_test)
+    else
+        # ── Internal train/test split ──────────────────────────────────
+        X_all  = _encode_features(r_cols, feature_names, n_real; ref_cols = r_cols)
+        y_all, _ = _extract_target(r_cols, target, n_real)
+
+        if task == :classification
+            train_idx, test_idx = _stratified_split(y_all, test_frac, rng)
+        else
+            perm = Random.randperm(rng, n_real)
+            n_test_split = max(1, round(Int, n_real * test_frac))
+            test_idx  = perm[1:n_test_split]
+            train_idx = perm[n_test_split+1:end]
+        end
+
+        X_train = X_all[train_idx, :]
+        X_test  = X_all[test_idx, :]
+        y_train = y_all[train_idx]
+        y_test  = y_all[test_idx]
+    end
 
     if task == :classification
-        # ── Classification ──────────────────────────────────────────────
-        # Train on synth, test on real
-        forest_synth = DecisionTree.build_forest(
-            y_synth, X_synth, -1, n_trees)
-        preds_synth = DecisionTree.apply_forest(forest_synth, X_real)
-        synth_acc = count(preds_synth .== y_real) / n_real
+        # ── Classification with EvoTrees ───────────────────────────────
+        config = EvoTrees.EvoTreeClassifier(;
+            nrounds, max_depth, eta, nbins,
+            early_stopping_rounds = 50)
 
-        # Baseline: train on real, test on real (leave-one-out approx)
-        forest_real = DecisionTree.build_forest(
-            y_real, X_real, -1, n_trees)
-        preds_real = DecisionTree.apply_forest(forest_real, X_real)
-        real_acc = count(preds_real .== y_real) / n_real
+        # Train on synth, test on held-out real
+        m_synth = EvoTrees.fit(config;
+            x_train = X_synth, y_train = y_synth,
+            x_eval = X_test, y_eval = y_test,
+            verbosity = 0)
+        pred_probs_synth = EvoTrees.predict(m_synth, X_test)
+        levels_synth = m_synth.info[:target_levels]
+        preds_synth = [String(levels_synth[argmax(pred_probs_synth[i, :])]) for i in axes(pred_probs_synth, 1)]
+        synth_f1, synth_acc = _macro_f1(y_test, preds_synth)
 
-        ratio = real_acc > 0 ? synth_acc / real_acc : 0.0
+        # Baseline: train on real train, test on held-out real
+        m_real = EvoTrees.fit(config;
+            x_train = X_train, y_train = y_train,
+            x_eval = X_test, y_eval = y_test,
+            verbosity = 0)
+        pred_probs_real = EvoTrees.predict(m_real, X_test)
+        levels_real = m_real.info[:target_levels]
+        preds_real = [String(levels_real[argmax(pred_probs_real[i, :])]) for i in axes(pred_probs_real, 1)]
+        real_f1, real_acc = _macro_f1(y_test, preds_real)
+
+        ratio = real_f1 > 0 ? synth_f1 / real_f1 : 0.0
 
         return (;
-            task        = task,
-            synth_score = synth_acc,
-            real_score  = real_acc,
-            ratio       = ratio,
+            task           = task,
+            synth_score    = synth_f1,
+            real_score     = real_f1,
+            ratio          = ratio,
+            synth_accuracy = synth_acc,
+            real_accuracy  = real_acc,
         )
     else
-        # ── Regression ──────────────────────────────────────────────────
-        forest_synth = DecisionTree.build_forest(
-            y_synth, X_synth, -1, n_trees)
-        preds_synth = DecisionTree.apply_forest(forest_synth, X_real)
-        synth_rmse = sqrt(sum(abs2, preds_synth .- y_real) / n_real)
+        # ── Regression with EvoTrees ───────────────────────────────────
+        config = EvoTrees.EvoTreeRegressor(;
+            nrounds, max_depth, eta, nbins,
+            early_stopping_rounds = 50)
 
-        forest_real = DecisionTree.build_forest(
-            y_real, X_real, -1, n_trees)
-        preds_real = DecisionTree.apply_forest(forest_real, X_real)
-        real_rmse = sqrt(sum(abs2, preds_real .- y_real) / n_real)
+        m_synth = EvoTrees.fit(config;
+            x_train = X_synth, y_train = Float64.(y_synth),
+            x_eval = X_test, y_eval = Float64.(y_test),
+            verbosity = 0)
+        preds_synth = vec(EvoTrees.predict(m_synth, X_test))
+        synth_rmse = sqrt(sum(abs2, preds_synth .- y_test) / length(y_test))
+
+        m_real = EvoTrees.fit(config;
+            x_train = X_train, y_train = Float64.(y_train),
+            x_eval = X_test, y_eval = Float64.(y_test),
+            verbosity = 0)
+        preds_real = vec(EvoTrees.predict(m_real, X_test))
+        real_rmse = sqrt(sum(abs2, preds_real .- y_test) / length(y_test))
 
         ratio = real_rmse > 0 ? synth_rmse / real_rmse : Inf
 

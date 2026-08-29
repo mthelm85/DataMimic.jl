@@ -248,7 +248,7 @@ a later phase.
 | **REQ-EVL-004** | `fidelity_score` shall return a `NamedTuple` containing per-column scores, a 2D correlation score, and a weighted aggregate. | Done | 4 |
 | **REQ-EVL-005** | `privacy_dcr(real, synth)` shall compute the Distance to Closest Record for every synthetic row. | Done | 4 |
 | **REQ-EVL-006** | `privacy_dcr` shall return a `NamedTuple` containing the DCR vector, its median, its 5th-percentile, and a count of exact matches (DCR = 0). | Done | 4 |
-| **REQ-EVL-007** | `utility_tstr(real, synth, target)` shall train a `RandomForestClassifier` or `RandomForestRegressor` from `DecisionTree.jl` on `synth` and evaluate on held-out `real`. | Done | 4 |
+| **REQ-EVL-007** | `utility_tstr(real, synth, target)` shall train an `EvoTreeClassifier` or `EvoTreeRegressor` from `EvoTrees.jl` on `synth` and evaluate on held-out `real`, reporting macro-averaged F1 for classification (following TabDDPM [Kotelnikov et al. 2023]). Accepts an optional `test` kwarg for an external held-out test set; otherwise splits `real` 80/20 with stratified sampling. | Done | 4 |
 | **REQ-EVL-008** | `utility_tstr` shall auto-detect classification vs. regression from the `target` column's element type. | Done | 4 |
 | **REQ-EVL-009** | `utility_tstr` shall return a `NamedTuple` with accuracy or RMSE for both synth-trained and real-trained models, plus their ratio. | Done | 4 |
 | **REQ-EVL-010** | `jensen_shannon(real, synth)` shall compute per-column Jensen–Shannon divergence, discretizing continuous columns into equal-width bins (default 50). | Must | 4b |

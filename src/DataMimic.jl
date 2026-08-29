@@ -7,7 +7,7 @@ import StatsBase
 import Copulas
 import LinearAlgebra
 import Optimisers
-import DecisionTree
+import EvoTrees
 
 include("types.jl")
 include("detect.jl")
