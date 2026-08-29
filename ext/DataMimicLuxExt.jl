@@ -6,11 +6,13 @@
 # Implements REQ-DIF-001 through REQ-DIF-009.
 #
 # References:
-#   [Kotelnikov et al. 2023] — TabDDPM architecture
-#   [Ho et al. 2020]         — DDPM (Gaussian diffusion)
-#   [Hoogeboom et al. 2021]  — Multinomial diffusion
-#   [Abadi et al. 2016]      — DP-SGD
-#   [Mironov 2017]           — Rényi DP accounting
+#   [Kotelnikov et al. 2023]   — TabDDPM architecture (ResNet MLP + additive
+#                                 timestep conditioning + LayerNorm + SiLU)
+#   [Ho et al. 2020]           — DDPM (Gaussian diffusion)
+#   [Song et al. 2020]         — DDIM (deterministic reverse sampling)
+#   [Hoogeboom et al. 2021]    — Multinomial diffusion
+#   [Abadi et al. 2016]        — DP-SGD
+#   [Mironov et al. 2019]      — Exact subsampled Gaussian RDP accounting
 
 module DataMimicLuxExt
 
@@ -28,8 +30,15 @@ import Zygote
 using Random: AbstractRNG
 import Random
 import Tables
-import StatsBase
 import LinearAlgebra
+
+# Custom relu that bypasses cuDNN (avoids CUDNN_STATUS_SUBLIBRARY_LOADING_FAILED
+# when cuDNN is missing or version-mismatched).  Pure CUDA element-wise kernel.
+_fast_relu(x) = max(x, zero(x))
+
+# SiLU / Swish activation — used in timestep embedding MLP and ResNet blocks
+# [Kotelnikov et al. 2023, TabDDPM architecture].
+_fast_silu(x) = x / (1f0 + exp(-x))
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. Data Preprocessing
@@ -153,9 +162,10 @@ function Lux.initialstates(::AbstractRNG, layer::SinusoidalEmbedding)
 end
 
 function (layer::SinusoidalEmbedding)(t, ps, st)
-    # t: (1, batch) or (batch,) — integer timesteps
-    t_flat = Float32.(vec(t))       # (batch,)
-    freqs  = st.freqs               # (half,)
+    # t: (batch,) — Float32 timesteps, expected on same device as st.freqs.
+    # Callers must move t to device before calling.
+    t_flat = vec(t)                 # (batch,) on device
+    freqs  = st.freqs               # (half,) on device
     args   = t_flat' .* freqs       # (half, batch)
     emb    = vcat(sin.(args), cos.(args))  # (dim, batch)
     return emb, st
@@ -164,55 +174,109 @@ end
 Lux.statelength(l::SinusoidalEmbedding) = l.dim ÷ 2
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. ResNet MLP Backbone
+# 4. TabDDPM Backbone  [Kotelnikov et al. 2023]
 # ═══════════════════════════════════════════════════════════════════════════
+#
+# Architecture (following the TabDDPM ResNet MLP):
+#   1. Sinusoidal timestep embedding → 2-layer MLP with SiLU
+#   2. Input features → Dense projection → + time embedding
+#   3. ResNet blocks: [LayerNorm → SiLU → Dense → SiLU → (Dropout) → Dense]
+#      with residual skip connections
+#   4. Output head:  LayerNorm → SiLU → Dense → d_out
+
+"""
+Lux container layer for the TabDDPM denoising network.
+
+Subcomponents:
+- `proj`:     Dense(d_in → hidden)  — input feature projection
+- `time_mlp`: Chain(Dense → SiLU → Dense) — timestep embedding projection
+- `blocks`:   Chain of SkipConnection ResNet blocks with LayerNorm + SiLU
+- `out_head`: Chain(LayerNorm → SiLU → Dense) — output projection
+
+Call signature: `(model)((features, t_emb), ps, st)` where
+- `features`: (d_in, batch) — concatenated numeric + categorical features
+- `t_emb`:    (embed_dim, batch) — raw sinusoidal timestep embedding
+"""
+struct TabDDPMBackbone <: Lux.AbstractLuxContainerLayer{(:proj, :time_mlp, :blocks, :out_head)}
+    proj
+    time_mlp
+    blocks
+    out_head
+end
+
+function (m::TabDDPMBackbone)((features, t_emb), ps, st)
+    # Project input features: (d_in, B) → (hidden, B)
+    h, st_proj = Lux.apply(m.proj, features, ps.proj, st.proj)
+
+    # Project timestep embedding: (embed_dim, B) → (hidden, B), then add
+    t_proj, st_tmlp = Lux.apply(m.time_mlp, t_emb, ps.time_mlp, st.time_mlp)
+    h = h .+ t_proj
+
+    # ResNet blocks (residual connections handled by SkipConnection)
+    h, st_blocks = Lux.apply(m.blocks, h, ps.blocks, st.blocks)
+
+    # Output head
+    output, st_head = Lux.apply(m.out_head, h, ps.out_head, st.out_head)
+
+    st_new = (; proj = st_proj, time_mlp = st_tmlp,
+                blocks = st_blocks, out_head = st_head)
+    return output, st_new
+end
 
 """
 Build the TabDDPM denoising network.
 
-Architecture: input projection → [ResNet block × n_blocks] → output heads.
+Architecture: proj(features) + time_mlp(t_emb) → ResNet blocks → output.
 
-- `d_in`:  concatenated input dimension (d_num + d_cat_onehot + embed_dim)
-- `d_num`: number of numeric output channels (predict noise ε)
+- `d_in`:     feature dimension (d_num + d_cat_onehot) — no timestep embedding
+- `d_num`:    number of numeric output channels (predict noise ε)
 - `cat_dims`: per-categorical output logits
-- `hidden`: hidden dimension
+- `hidden`:   hidden dimension
 - `n_blocks`: number of residual blocks
-- `embed_dim`: timestep embedding dimension
+- `embed_dim`:timestep embedding dimension
 """
 function _build_model(d_in::Int, d_num::Int, cat_dims::Vector{Int};
                       hidden::Int = 256, n_blocks::Int = 4,
                       embed_dim::Int = 128, dropout::Float64 = 0.0)
     d_out = d_num + sum(cat_dims; init = 0)
 
-    layers = []
+    # Input projection (no activation — first block has pre-activation norm)
+    proj = Dense(d_in => hidden)
 
-    # Input projection
-    push!(layers, Dense(d_in => hidden, relu))
+    # Time embedding MLP: embed_dim → hidden with SiLU
+    time_mlp = Chain(
+        Dense(embed_dim => hidden, _fast_silu),
+        Dense(hidden => hidden))
 
-    # Residual blocks
+    # Residual blocks: pre-activation ResNet [LayerNorm → SiLU → Dense → SiLU → Dense]
+    block_layers = []
     for _ in 1:n_blocks
-        block = if dropout > 0
-            SkipConnection(
-                Chain(Dense(hidden => hidden, relu),
-                      Lux.Dropout(Float32(dropout)),
-                      Dense(hidden => hidden)),
-                +)
+        inner = if dropout > 0
+            Chain(
+                Lux.LayerNorm((hidden,)),
+                Lux.WrappedFunction(x -> _fast_silu.(x)),
+                Dense(hidden => hidden, _fast_silu),
+                Lux.Dropout(Float32(dropout)),
+                Dense(hidden => hidden))
         else
-            SkipConnection(
-                Chain(Dense(hidden => hidden, relu),
-                      Dense(hidden => hidden)),
-                +)
+            Chain(
+                Lux.LayerNorm((hidden,)),
+                Lux.WrappedFunction(x -> _fast_silu.(x)),
+                Dense(hidden => hidden, _fast_silu),
+                Dense(hidden => hidden))
         end
-        push!(layers, block)
-        push!(layers, Lux.WrappedFunction(relu))
+        push!(block_layers, SkipConnection(inner, +))
     end
+    blocks = Chain(block_layers...)
 
-    # Output head
-    push!(layers, Dense(hidden => d_out))
+    # Output head: LayerNorm → SiLU → Dense
+    out_head = Chain(
+        Lux.LayerNorm((hidden,)),
+        Lux.WrappedFunction(x -> _fast_silu.(x)),
+        Dense(hidden => d_out))
 
-    backbone = Chain(layers...)
-
-    return backbone, embed_dim
+    model = TabDDPMBackbone(proj, time_mlp, blocks, out_head)
+    return model, embed_dim
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -224,12 +288,14 @@ Gaussian forward diffusion: add noise to numeric features at timestep t.
 
     x_t = √ᾱ_t · x_0 + √(1 - ᾱ_t) · ε
 """
-function _gaussian_forward(x0, alphas_cumprod, t, rng)
+function _gaussian_forward(x0, alphas_cumprod, t, rng, dev)
     batch = size(x0, 2)
-    abar  = alphas_cumprod[t]'                  # (1, batch)
+    # Index alphas_cumprod on CPU to avoid GPU scalar indexing
+    abar_cpu = Float32.(alphas_cumprod[t])'      # (1, batch) on CPU
+    abar     = _to_device(abar_cpu, dev)
     sqrt_abar       = sqrt.(abar)
     sqrt_one_m_abar = sqrt.(1f0 .- abar)
-    ε = randn(rng, Float32, size(x0)...)
+    ε = _to_device(randn(rng, Float32, size(x0)...), dev)
     x_t = sqrt_abar .* x0 .+ sqrt_one_m_abar .* ε
     return x_t, ε
 end
@@ -241,9 +307,11 @@ Multinomial forward diffusion: corrupt categorical one-hot at timestep t.
 
 Returns softened one-hot vectors (not re-sampled — used directly as input).
 """
-function _multinomial_forward(x0_oh, cat_dims, alphas_cumprod, t)
+function _multinomial_forward(x0_oh, cat_dims, alphas_cumprod, t, dev)
     batch = size(x0_oh, 2)
-    abar  = alphas_cumprod[t]'                  # (1, batch)
+    # Index alphas_cumprod on CPU to avoid GPU scalar indexing
+    abar_cpu = Float32.(alphas_cumprod[t])'      # (1, batch) on CPU
+    abar     = _to_device(abar_cpu, dev)
 
     x_t = similar(x0_oh)
     offset = 0
@@ -263,27 +331,29 @@ end
 """
 Combined loss: MSE on Gaussian noise prediction + cross-entropy on
 multinomial logits.
+
+`x_cat_original` is the un-noised one-hot encoding of the true
+categorical labels (same layout as `X_cat_noised`).  Using it avoids
+scalar indexing into GPU arrays.
 """
 function _diffusion_loss(backbone, emb_layer, ps_backbone, ps_emb,
                          st_backbone, st_emb,
-                         X_num_noised, X_cat_noised, cat_indices_batch,
+                         X_num_noised, X_cat_noised, x_cat_original,
                          t_batch, ε_true, d_num, cat_dims)
-    # Timestep embedding
+    # Timestep embedding (sinusoidal)
     t_emb, st_emb_new = Lux.apply(emb_layer, t_batch, ps_emb, st_emb)
 
-    # Concatenate input (no mutation — Zygote-safe)
-    input = if d_num > 0 && length(cat_dims) > 0
-        vcat(X_num_noised, X_cat_noised, t_emb)
+    # Feature input (timestep conditioning handled inside backbone via addition)
+    features = if d_num > 0 && length(cat_dims) > 0
+        vcat(X_num_noised, X_cat_noised)
     elseif d_num > 0
-        vcat(X_num_noised, t_emb)
-    elseif length(cat_dims) > 0
-        vcat(X_cat_noised, t_emb)
+        X_num_noised
     else
-        t_emb
+        X_cat_noised
     end
 
-    # Forward pass
-    output, st_bb_new = Lux.apply(backbone, input, ps_backbone, st_backbone)
+    # Forward pass (backbone projects features + t_emb, adds, then ResNet)
+    output, st_bb_new = Lux.apply(backbone, (features, t_emb), ps_backbone, st_backbone)
 
     loss = 0f0
     batch = size(output, 2)
@@ -294,22 +364,22 @@ function _diffusion_loss(backbone, emb_layer, ps_backbone, ps_emb,
         loss += sum(abs2, ε_pred .- ε_true) / (d_num * batch)
     end
 
-    # ── Multinomial cross-entropy loss ─────────────────────────────────
+    # ── Multinomial cross-entropy loss (GPU-safe, no scalar indexing) ──
     offset = d_num
+    cat_offset = 0
     n_cat  = length(cat_dims)
     if n_cat > 0
         ce = 0f0
-        for (c, K) in enumerate(cat_dims)
+        for K in cat_dims
             logits = output[(offset + 1):(offset + K), :]   # (K, batch)
             # Numerically stable log-softmax
             m = maximum(logits; dims = 1)
             log_probs = logits .- m .- log.(sum(exp.(logits .- m); dims = 1))
-            # Gather the log-prob of the true class
-            for i in 1:batch
-                k = cat_indices_batch[c, i]
-                ce -= log_probs[k, i]
-            end
+            # Vectorized CE: one-hot target · log_probs
+            oh_target = x_cat_original[(cat_offset + 1):(cat_offset + K), :]
+            ce -= sum(oh_target .* log_probs)
             offset += K
+            cat_offset += K
         end
         loss += ce / (n_cat * batch)
     end
@@ -379,7 +449,11 @@ function _grad_add_noise!(gs::NamedTuple, σ::Float64, rng)
     return NamedTuple{keys(gs)}(map(v -> _grad_add_noise!(v, σ, rng), values(gs)))
 end
 function _grad_add_noise!(gs::AbstractArray, σ::Float64, rng)
-    gs .+= randn(rng, Float32, size(gs)...) .* Float32(σ)
+    noise = randn(rng, Float32, size(gs)...)
+    # Match device of gradient array (GPU-safe)
+    noise_d = similar(gs)
+    copyto!(noise_d, noise)
+    gs .+= noise_d .* Float32(σ)
     return gs
 end
 _grad_add_noise!(::Nothing, _, _) = nothing
@@ -416,6 +490,32 @@ function _compute_grad(loss_fn, ::Val{:zygote}, ps)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 8b. Device Abstraction (REQ-DIF-010 through REQ-DIF-013)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Auto-detect GPU if LuxCUDA / Metal / AMDGPU is loaded; otherwise CPU.
+# No GPU package is a dependency — the user opts in by loading LuxCUDA.
+
+"""
+    _get_devices() -> (compute_device, cpu_device)
+
+Return the best available compute device and the CPU device.
+If CUDA/Metal/ROCm is loaded, returns the GPU device; otherwise CPU.
+"""
+function _get_devices()
+    gdev = Lux.gpu_device(; force = false)  # returns CPU if no GPU
+    cdev = Lux.cpu_device()
+    return gdev, cdev
+end
+
+"""
+    _to_device(x, dev)
+
+Move `x` to the given device. For arrays, NamedTuples, and Lux states.
+"""
+_to_device(x, dev) = dev(x)
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 9. Standard Training Loop
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -423,12 +523,20 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
                           st_bb, st_emb,
                           X_num, X_cat_oh, cat_indices,
                           betas, alphas_cumprod, cat_dims, d_num,
-                          epochs, batch_size, rng)
+                          epochs, batch_size, rng, dev)
     T     = length(betas)
     nrows = size(X_num, 2) > 0 ? size(X_num, 2) : size(X_cat_oh, 2)
 
+    # Move training data and params to device (GPU if available)
+    X_num_d     = _to_device(X_num, dev)
+    X_cat_oh_d  = _to_device(X_cat_oh, dev)
+    cat_indices_d = _to_device(cat_indices, dev)
+    alphas_cumprod_d = _to_device(alphas_cumprod, dev)
+
     # Merge params for optimizer
-    ps_all    = (; backbone = ps_bb, emb = ps_emb)
+    ps_all    = _to_device((; backbone = ps_bb, emb = ps_emb), dev)
+    st_bb     = _to_device(st_bb, dev)
+    st_emb    = _to_device(st_emb, dev)
     opt_state = Optimisers.setup(Optimisers.Adam(1f-3), ps_all)
 
     for epoch in 1:epochs
@@ -439,23 +547,24 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
             bs   = length(idx)
 
             t_batch = rand(rng, 1:T, bs)
+            # Move timesteps to device as Float32 (outside AD-traced code)
+            t_batch_d = _to_device(Float32.(t_batch), dev)
 
-            # Forward diffusion
-            x_num_batch = d_num > 0 ? X_num[:, idx] : zeros(Float32, 0, bs)
-            x_cat_batch = size(X_cat_oh, 1) > 0 ? X_cat_oh[:, idx] : zeros(Float32, 0, bs)
-            cat_idx_batch = size(cat_indices, 1) > 0 ? cat_indices[:, idx] : zeros(Int, 0, bs)
+            # Forward diffusion (slice on device)
+            x_num_batch = d_num > 0 ? X_num_d[:, idx] : _to_device(zeros(Float32, 0, bs), dev)
+            x_cat_batch = size(X_cat_oh_d, 1) > 0 ? X_cat_oh_d[:, idx] : _to_device(zeros(Float32, 0, bs), dev)
 
             if d_num > 0
-                x_num_noised, ε = _gaussian_forward(x_num_batch, alphas_cumprod, t_batch, rng)
+                x_num_noised, ε = _gaussian_forward(x_num_batch, alphas_cumprod_d, t_batch, rng, dev)
             else
-                x_num_noised = zeros(Float32, 0, bs)
-                ε = zeros(Float32, 0, bs)
+                x_num_noised = _to_device(zeros(Float32, 0, bs), dev)
+                ε = _to_device(zeros(Float32, 0, bs), dev)
             end
 
             if size(x_cat_batch, 1) > 0
-                x_cat_noised = _multinomial_forward(x_cat_batch, cat_dims, alphas_cumprod, t_batch)
+                x_cat_noised = _multinomial_forward(x_cat_batch, cat_dims, alphas_cumprod_d, t_batch, dev)
             else
-                x_cat_noised = zeros(Float32, 0, bs)
+                x_cat_noised = _to_device(zeros(Float32, 0, bs), dev)
             end
 
             # Gradient (dispatched through AD backend — REQ-DIF-009)
@@ -463,8 +572,8 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
                 _diffusion_loss(backbone, emb_layer,
                                 p.backbone, p.emb,
                                 st_bb, st_emb,
-                                x_num_noised, x_cat_noised, cat_idx_batch,
-                                t_batch, ε, d_num, cat_dims)
+                                x_num_noised, x_cat_noised, x_cat_batch,
+                                t_batch_d, ε, d_num, cat_dims)
             end
             st_bb, st_emb = states_new
 
@@ -479,16 +588,31 @@ end
 # 10. DP-SGD Training Loop
 # ═══════════════════════════════════════════════════════════════════════════
 
+"""Log-sum-exp with numerical stability."""
+function _logsumexp(xs)
+    m = maximum(xs)
+    isinf(m) && return m
+    return m + log(sum(exp.(xs .- m)))
+end
+
+"""Log of n! — hand-rolled to avoid a SpecialFunctions.jl dependency."""
+function _logfactorial(n::Int)
+    n <= 1 && return 0.0
+    return sum(log(Float64(i)) for i in 2:n)
+end
+
 """
 Rényi DP accountant: compute (ε, δ)-DP spent after `steps` applications of
-the Gaussian mechanism with noise multiplier `σ` and sampling rate `q`.
+the subsampled Gaussian mechanism with noise multiplier `σ` and sampling
+rate `q`.
 
-Uses the Rényi divergence bound [Mironov 2017]:
-    ε(α) = (1/(α-1)) log(E[exp((α-1) · privacy_loss)])
+Uses the exact RDP bound for integer orders [Mironov et al. 2019]:
 
-For the subsampled Gaussian mechanism, we use the standard bound:
-    ε_RDP(α) ≤ (1/(α-1)) log(1 + q²α(α-1) / (2σ²))
-summed over `steps` compositions.  Convert to (ε, δ)-DP via:
+    ε_RDP(α) = (1/(α-1)) log( Σ_{k=0}^{α} C(α,k) (1-q)^{α-k} q^k
+                                              exp(k(k-1)/(2σ²)) )
+
+composed over `steps` via addition (RDP composition).  Converts to
+(ε, δ)-DP via:
     ε = min_α { ε_RDP(α) + log(1/δ) / (α-1) }
 """
 function _rdp_accountant(σ::Float64, q::Float64, steps::Int, delta::Float64)
@@ -496,9 +620,17 @@ function _rdp_accountant(σ::Float64, q::Float64, steps::Int, delta::Float64)
     best_eps = Inf
 
     for α in alphas
-        # RDP per step (subsampled Gaussian mechanism)
-        log_term = log(1 + q^2 * α * (α - 1) / (2 * σ^2))
-        rdp = log_term / (α - 1)
+        # Exact RDP for the subsampled Gaussian mechanism at integer α
+        log_terms = Vector{Float64}(undef, α + 1)
+        for k in 0:α
+            log_binom = _logfactorial(α) - _logfactorial(k) - _logfactorial(α - k)
+            log_coeff = log_binom +
+                        k * log(max(q, 1e-300)) +
+                        (α - k) * log(max(1 - q, 1e-300))
+            log_moment = k * (k - 1) / (2.0 * σ^2)
+            log_terms[k + 1] = log_coeff + log_moment
+        end
+        rdp = _logsumexp(log_terms) / (α - 1)
         rdp_total = rdp * steps
 
         # Convert RDP → (ε, δ)-DP
@@ -513,7 +645,7 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
                        st_bb, st_emb,
                        X_num, X_cat_oh, cat_indices,
                        betas, alphas_cumprod, cat_dims, d_num,
-                       epochs, batch_size, privacy, rng)
+                       epochs, batch_size, privacy, rng, dev)
     T     = length(betas)
     nrows = size(X_num, 2) > 0 ? size(X_num, 2) : size(X_cat_oh, 2)
 
@@ -538,7 +670,15 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
           "total_steps = $total_steps, " *
           "achieved ε ≈ $(round(_rdp_accountant(σ_noise, q, total_steps, privacy.delta); digits=3))"
 
-    ps_all    = (; backbone = ps_bb, emb = ps_emb)
+    # Move training data and params to device
+    X_num_d     = _to_device(X_num, dev)
+    X_cat_oh_d  = _to_device(X_cat_oh, dev)
+    cat_indices_d = _to_device(cat_indices, dev)
+    alphas_cumprod_d = _to_device(alphas_cumprod, dev)
+
+    ps_all    = _to_device((; backbone = ps_bb, emb = ps_emb), dev)
+    st_bb     = _to_device(st_bb, dev)
+    st_emb    = _to_device(st_emb, dev)
     opt_state = Optimisers.setup(Optimisers.Adam(1f-3), ps_all)
 
     for epoch in 1:epochs
@@ -550,39 +690,38 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
 
             t_batch = rand(rng, 1:T, bs)
 
-            x_num_batch = d_num > 0 ? X_num[:, idx] : zeros(Float32, 0, bs)
-            x_cat_batch = size(X_cat_oh, 1) > 0 ? X_cat_oh[:, idx] : zeros(Float32, 0, bs)
-            cat_idx_batch = size(cat_indices, 1) > 0 ? cat_indices[:, idx] : zeros(Int, 0, bs)
+            x_num_batch = d_num > 0 ? X_num_d[:, idx] : _to_device(zeros(Float32, 0, bs), dev)
+            x_cat_batch = size(X_cat_oh_d, 1) > 0 ? X_cat_oh_d[:, idx] : _to_device(zeros(Float32, 0, bs), dev)
 
             if d_num > 0
-                x_num_noised, ε = _gaussian_forward(x_num_batch, alphas_cumprod, t_batch, rng)
+                x_num_noised, ε = _gaussian_forward(x_num_batch, alphas_cumprod_d, t_batch, rng, dev)
             else
-                x_num_noised = zeros(Float32, 0, bs)
-                ε = zeros(Float32, 0, bs)
+                x_num_noised = _to_device(zeros(Float32, 0, bs), dev)
+                ε = _to_device(zeros(Float32, 0, bs), dev)
             end
 
             if size(x_cat_batch, 1) > 0
-                x_cat_noised = _multinomial_forward(x_cat_batch, cat_dims, alphas_cumprod, t_batch)
+                x_cat_noised = _multinomial_forward(x_cat_batch, cat_dims, alphas_cumprod_d, t_batch, dev)
             else
-                x_cat_noised = zeros(Float32, 0, bs)
+                x_cat_noised = _to_device(zeros(Float32, 0, bs), dev)
             end
 
             # ── Per-sample gradient clipping ────────────────────────────
             gs_sum = _grad_zero(ps_all)
 
             for si in 1:bs
-                xn_i  = d_num > 0 ? x_num_noised[:, si:si] : zeros(Float32, 0, 1)
-                xc_i  = size(x_cat_noised, 1) > 0 ? x_cat_noised[:, si:si] : zeros(Float32, 0, 1)
-                ci_i  = size(cat_idx_batch, 1) > 0 ? cat_idx_batch[:, si:si] : zeros(Int, 0, 1)
-                t_i   = [t_batch[si]]
-                ε_i   = d_num > 0 ? ε[:, si:si] : zeros(Float32, 0, 1)
+                xn_i  = d_num > 0 ? x_num_noised[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
+                xc_i  = size(x_cat_noised, 1) > 0 ? x_cat_noised[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
+                xc_orig_i = size(x_cat_batch, 1) > 0 ? x_cat_batch[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
+                t_i_d = _to_device(Float32.([t_batch[si]]), dev)
+                ε_i   = d_num > 0 ? ε[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
 
                 _, _, g = _compute_grad(AD_BACKEND, ps_all) do p
                     _diffusion_loss(backbone, emb_layer,
                                     p.backbone, p.emb,
                                     st_bb, st_emb,
-                                    xn_i, xc_i, ci_i,
-                                    t_i, ε_i, d_num, cat_dims)
+                                    xn_i, xc_i, xc_orig_i,
+                                    t_i_d, ε_i, d_num, cat_dims)
                 end
                 gnorm = sqrt(_grad_sqnorm(g))
                 clip_factor = min(1.0, C / max(gnorm, 1e-12))
@@ -608,15 +747,38 @@ end
 
 """
 Sample `n` rows from a trained TabDDPM model via reverse denoising.
+
+When `sampling_steps < T`, uses DDIM [Song et al. 2020] for the Gaussian
+reverse step and the natural subsequence posterior for categoricals
+[Hoogeboom et al. 2021].  `ddim_eta` controls stochasticity (0 =
+deterministic DDIM, 1 ≈ DDPM variance).
 """
 function _denoise_sample(backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
-                         betas, alphas_cumprod, d_num, cat_dims, n, rng)
+                         betas, alphas_cumprod, d_num, cat_dims, n, rng;
+                         sampling_steps::Int = 0, ddim_eta::Float32 = 0f0)
     T = length(betas)
     d_cat_total = sum(cat_dims; init = 0)
-    alphas = 1f0 .- betas
 
-    # Initialize from pure noise
-    x_num = d_num > 0 ? randn(rng, Float32, d_num, n) : zeros(Float32, 0, n)
+    # Build timestep subsequence (1-indexed, descending)
+    S = sampling_steps > 0 ? min(sampling_steps, T) : T
+    if S == T
+        # Full schedule: [T, T-1, …, 1]
+        timesteps = collect(T:-1:1)
+    else
+        # Uniformly-spaced subsequence from the training schedule
+        # E.g. S=50, T=1000 → [1000, 980, 960, …, 20]
+        timesteps = reverse(round.(Int, range(1, T; length = S)))
+        # Ensure no duplicates and the endpoints are included
+        timesteps = unique(timesteps)
+        S = length(timesteps)
+    end
+
+    # Detect device from params (they're already on the target device)
+    gdev, cdev = _get_devices()
+
+    # Initialize from pure noise on the compute device
+    x_num = d_num > 0 ? _to_device(randn(rng, Float32, d_num, n), gdev) :
+                        _to_device(zeros(Float32, 0, n), gdev)
     x_cat = d_cat_total > 0 ? begin
         # Uniform initialization for categoricals
         oh = zeros(Float32, d_cat_total, n)
@@ -625,89 +787,104 @@ function _denoise_sample(backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
             oh[(offset + 1):(offset + K), :] .= 1f0 / K
             offset += K
         end
-        oh
-    end : zeros(Float32, 0, n)
+        _to_device(oh, gdev)
+    end : _to_device(zeros(Float32, 0, n), gdev)
 
-    for t in T:-1:1
-        t_batch = fill(t, n)
+    for step_idx in 1:S
+        t    = timesteps[step_idx]
+        # ᾱ at the destination (previous) timestep
+        ᾱ_prev = step_idx < S ? alphas_cumprod[timesteps[step_idx + 1]] : 1f0
+        ᾱ_t    = alphas_cumprod[t]
 
-        # Timestep embedding
+        # Move timesteps to device as Float32 (match st_emb.freqs device)
+        t_batch = _to_device(Float32.(fill(t, n)), gdev)
+
+        # Timestep embedding (runs on device since ps_emb/st_emb are there)
         t_emb, _ = Lux.apply(emb_layer, t_batch, ps_emb, st_emb)
 
-        # Concatenate
-        input = if d_num > 0 && d_cat_total > 0
-            vcat(x_num, x_cat, t_emb)
+        # Feature input (timestep handled inside backbone via addition)
+        features = if d_num > 0 && d_cat_total > 0
+            vcat(x_num, x_cat)
         elseif d_num > 0
-            vcat(x_num, t_emb)
-        elseif d_cat_total > 0
-            vcat(x_cat, t_emb)
+            x_num
         else
-            t_emb
+            x_cat
         end
 
-        output, _ = Lux.apply(backbone, input, ps_bb, st_bb)
+        output, _ = Lux.apply(backbone, (features, t_emb), ps_bb, st_bb)
 
-        # ── Gaussian reverse step ──────────────────────────────────────
+        # ── Gaussian reverse step (DDIM, Song et al. 2020) ─────────
         if d_num > 0
             ε_pred = output[1:d_num, :]
-            α_t    = alphas[t]
-            ᾱ_t    = alphas_cumprod[t]
-            β_t    = betas[t]
 
-            # DDPM reverse mean: μ = (1/√α_t)(x_t - β_t/√(1-ᾱ_t) · ε_pred)
-            coef1 = 1f0 / sqrt(α_t)
-            coef2 = β_t / sqrt(1f0 - ᾱ_t + 1f-8)
-            mean  = coef1 .* (x_num .- coef2 .* ε_pred)
+            # Predict x̂₀ from ε-prediction
+            x0_pred = (x_num .- sqrt(1f0 - ᾱ_t + 1f-8) .* ε_pred) ./
+                      sqrt(ᾱ_t + 1f-8)
 
-            if t > 1
-                σ_t = sqrt(β_t)
-                z   = randn(rng, Float32, d_num, n)
-                x_num = mean .+ σ_t .* z
+            if step_idx < S   # not the final step
+                # DDIM variance: σ² = η² · (1-ᾱ_prev)/(1-ᾱ_t) · (1-ᾱ_t/ᾱ_prev)
+                σ² = ddim_eta^2 *
+                     ((1f0 - ᾱ_prev) / (1f0 - ᾱ_t + 1f-8)) *
+                     (1f0 - ᾱ_t / (ᾱ_prev + 1f-8))
+                σ  = sqrt(max(σ², 0f0))
+
+                # Direction pointing to x_t
+                dir_coef = sqrt(max(1f0 - ᾱ_prev - σ², 0f0))
+
+                x_num = sqrt(ᾱ_prev) .* x0_pred .+
+                        dir_coef .* ε_pred
+
+                if σ > 0f0
+                    z = _to_device(randn(rng, Float32, d_num, n), gdev)
+                    x_num = x_num .+ σ .* z
+                end
             else
-                x_num = mean
+                # Final step: deterministic
+                x_num = x0_pred
             end
         end
 
-        # ── Multinomial reverse step ───────────────────────────────────
+        # ── Multinomial reverse step (Hoogeboom et al. 2021) ────────
+        # Posterior: q(x_prev|x_t, x̂₀) ∝ q(x_t|x_prev) · q(x_prev|x̂₀)
+        # For skipped steps, α̃ = ᾱ_t/ᾱ_prev (effective retention).
+        # Sampled via the Gumbel-max trick (GPU-native, no CPU transfer).
         if d_cat_total > 0
+            # Effective single-step retention for the skip
+            α_eff = ᾱ_t / (ᾱ_prev + 1f-20)
+
             offset_in  = d_num
             offset_out = 0
             for K in cat_dims
                 logits = output[(offset_in + 1):(offset_in + K), :]
 
-                # Predict x_0 probabilities from logits (softmax)
+                # Predict x̂₀ probabilities from logits (softmax)
                 m = maximum(logits; dims = 1)
                 exp_logits = exp.(logits .- m)
                 probs_x0 = exp_logits ./ sum(exp_logits; dims = 1)
 
-                if t > 1
-                    # Posterior: q(x_{t-1} | x_t, x_0_pred)
-                    # Use the predicted x_0 to compute the posterior distribution
-                    ᾱ_t   = alphas_cumprod[t]
-                    ᾱ_tm1 = t > 1 ? alphas_cumprod[t - 1] : 1f0
-                    uniform = 1f0 / K
+                # Current one-hot state x_t for this variable
+                x_t_block = x_cat[(offset_out + 1):(offset_out + K), :]
 
-                    # Compute posterior for each sample
-                    for i in 1:n
-                        p0 = probs_x0[:, i]
-                        # q(x_{t-1} | x_0) for each possible x_0 category
-                        # ∝ q(x_t | x_{t-1}) * q(x_{t-1} | x_0)
-                        # Simplified: use predicted x_0 probs directly, re-noise to t-1
-                        posterior = ᾱ_tm1 .* p0 .+ (1f0 - ᾱ_tm1) * uniform
-                        posterior ./= sum(posterior)
-                        # Sample from posterior
-                        k = StatsBase.sample(rng, 1:K, StatsBase.Weights(max.(posterior, 0f0)))
-                        x_cat[(offset_out + 1):(offset_out + K), i] .= 0f0
-                        x_cat[offset_out + k, i] = 1f0
-                    end
-                else
-                    # Final step: argmax
-                    for i in 1:n
-                        k = argmax(probs_x0[:, i])
-                        x_cat[(offset_out + 1):(offset_out + K), i] .= 0f0
-                        x_cat[offset_out + k, i] = 1f0
-                    end
-                end
+                # Likelihood: q(x_t | x_prev=k) = α̃·[x_t]_k + (1−α̃)/K
+                log_likelihood = log.(α_eff .* x_t_block .+ (1f0 - α_eff) / K .+ 1f-20)
+                # Prior:      q(x_prev=k | x̂₀)  = ᾱ_prev·[x̂₀]_k + (1−ᾱ_prev)/K
+                log_prior = log.(ᾱ_prev .* probs_x0 .+ (1f0 - ᾱ_prev) / K .+ 1f-20)
+
+                # Unnormalized log-posterior (normalization is unnecessary
+                # for Gumbel-max since argmax is shift-invariant)
+                log_unnorm = log_likelihood .+ log_prior
+
+                # Gumbel-max trick: k = argmax(log p_k + Gumbel(0,1)) ~ Cat(p)
+                u = _to_device(rand(rng, Float32, K, n), gdev)
+                gumbel = -log.(-log.(u .+ 1f-10) .+ 1f-10)
+                noisy = log_unnorm .+ gumbel
+
+                # One-hot from column-wise argmax (fully on GPU)
+                col_max = maximum(noisy; dims = 1)
+                new_oh = Float32.(noisy .== col_max)
+
+                # In-place update (not in AD-traced code, mutation is safe)
+                x_cat[(offset_out + 1):(offset_out + K), :] .= new_oh
 
                 offset_in  += K
                 offset_out += K
@@ -772,7 +949,7 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
     embed_dim = 128
     hidden    = min(256, max(64, 4 * (d_num + d_cat_total)))
     n_blocks  = 4
-    d_in      = d_num + d_cat_total + embed_dim
+    d_in      = d_num + d_cat_total   # timestep handled via addition, not concat
 
     backbone, _ = _build_model(d_in, d_num, cat_dims_v;
                                hidden = hidden, n_blocks = n_blocks,
@@ -783,20 +960,30 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
     ps_bb, st_bb   = Lux.setup(lux_rng, backbone)
     ps_emb, st_emb = Lux.setup(lux_rng, emb_layer)
 
+    # ── Detect device (GPU if available) ─────────────────────────────
+    gdev, cdev = _get_devices()
+    @info "DiffusionGenerator: training on $(gdev)"
+
     # ── Train ──────────────────────────────────────────────────────────
     if gen.dp
         ps_bb, ps_emb, st_bb, st_emb = _train_dpsgd!(
             backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
             X_num, X_cat_oh, cat_indices,
             betas, alphas_cumprod, cat_dims_v, d_num,
-            gen.epochs, gen.batch_size, privacy, rng)
+            gen.epochs, gen.batch_size, privacy, rng, gdev)
     else
         ps_bb, ps_emb, st_bb, st_emb = _train_standard!(
             backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
             X_num, X_cat_oh, cat_indices,
             betas, alphas_cumprod, cat_dims_v, d_num,
-            gen.epochs, gen.batch_size, rng)
+            gen.epochs, gen.batch_size, rng, gdev)
     end
+
+    # ── Move trained params back to CPU for storage / serialization ──
+    ps_bb  = _to_device(ps_bb, cdev)
+    ps_emb = _to_device(ps_emb, cdev)
+    st_bb  = _to_device(st_bb, cdev)
+    st_emb = _to_device(st_emb, cdev)
 
     id_cols = [name for name in col_names if name in id_set]
 
@@ -821,8 +1008,18 @@ end
 # 13. sample(::FittedDiffusionModel, …)
 # ═══════════════════════════════════════════════════════════════════════════
 
+"""
+    sample(model::FittedDiffusionModel, n; rng, sampling_steps, ddim_eta)
+
+Generate `n` synthetic rows.  `sampling_steps` (default: full T=1000)
+selects how many reverse-diffusion steps to run — fewer steps is faster
+at some quality cost.  `ddim_eta` (default 0, deterministic DDIM)
+controls stochasticity when step-skipping [Song et al. 2020].
+"""
 function sample(model::FittedDiffusionModel, n::Int;
-                rng::AbstractRNG = model.rng)
+                rng::AbstractRNG = model.rng,
+                sampling_steps::Int = 0,
+                ddim_eta::Float64 = 0.0)
     n ≥ 1 || throw(ArgumentError("n must be at least 1, got $n"))
 
     if n > 10 * model.n_original
@@ -836,19 +1033,28 @@ function sample(model::FittedDiffusionModel, n::Int;
 
     backbone  = full_model.backbone
     emb_layer = full_model.emb
-    ps_bb     = full_ps.backbone
-    ps_emb    = full_ps.emb
-    st_bb     = full_st.backbone
-    st_emb    = full_st.emb
 
     d_num     = length(model.num_columns)
     cat_dims  = model.cat_dims
+
+    # ── Move model to best available device for sampling ───────────────
+    gdev, cdev = _get_devices()
+    ps_bb  = _to_device(full_ps.backbone, gdev)
+    ps_emb = _to_device(full_ps.emb, gdev)
+    st_bb  = _to_device(full_st.backbone, gdev)
+    st_emb = _to_device(full_st.emb, gdev)
 
     # ── Reverse denoise ────────────────────────────────────────────────
     x_num, x_cat = _denoise_sample(
         backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
         model.betas, model.alphas_cumprod,
-        d_num, cat_dims, n, rng)
+        d_num, cat_dims, n, rng;
+        sampling_steps = sampling_steps,
+        ddim_eta = Float32(ddim_eta))
+
+    # Move results back to CPU for post-processing
+    x_num = _to_device(x_num, cdev)
+    x_cat = _to_device(x_cat, cdev)
 
     # ── Unpack into result dict ────────────────────────────────────────
     result = Dict{Symbol, Vector}()

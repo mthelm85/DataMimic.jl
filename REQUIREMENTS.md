@@ -198,7 +198,7 @@ a later phase.
 
 | ID | Requirement | MoSCoW | Phase |
 |----|-------------|--------|-------|
-| **REQ-DPC-001** | `DPCopulaGenerator` shall compute DP-noisy quantiles via the smooth-sensitivity mechanism \[Smith 2011\]. | Done | 2 |
+| **REQ-DPC-001** | `DPCopulaGenerator` shall compute DP-noisy marginals via histogram binning with calibrated Gaussian noise (zCDP). | Done | 2 |
 | **REQ-DPC-002** | `DPCopulaGenerator` shall compute a private covariance matrix via the Analyze-Gauss mechanism \[Dwork et al. 2014\]. | Done | 2 |
 | **REQ-DPC-003** | `DPCopulaGenerator` shall fit a Gaussian copula from the private covariance. | Done | 2 |
 
@@ -217,6 +217,10 @@ a later phase.
 | **REQ-DIF-007** | `DiffusionGenerator` shall be implemented as a Lux.jl package extension (`LuxExt`). | Done | 3 |
 | **REQ-DIF-008** | IF `DiffusionGenerator` is requested and `Lux.jl` is not loaded, THEN `fit()` shall throw `ErrorException` with the message `"DiffusionGenerator requires Lux.jl. Run \`using Lux\` before calling fit."`. | Done | 3 |
 | **REQ-DIF-009** | The `LuxExt` shall use `AutoZygote()` as the initial AD backend, with the architecture structured so switching to `AutoEnzyme()` is a single-token change. | Done | 3 |
+| **REQ-DIF-010** | WHEN a GPU device is available (user has loaded `LuxCUDA`, `Metal.jl`, or `AMDGPU.jl`), the `LuxExt` shall auto-detect it via `Lux.gpu_device()` and move training data, model parameters, and optimizer state to the GPU. | Done | 4b |
+| **REQ-DIF-011** | WHEN training completes on GPU, the `LuxExt` shall move trained parameters back to CPU before storing them in `FittedDiffusionModel`. | Done | 4b |
+| **REQ-DIF-012** | WHEN sampling from a `FittedDiffusionModel`, the `LuxExt` shall move the model to the available device for the denoising loop, then move results back to CPU for post-processing. | Done | 4b |
+| **REQ-DIF-013** | GPU support shall not introduce any new dependencies on DataMimic — `LuxCUDA` is the user's opt-in, detected at runtime. | Done | 4b |
 
 ---
 
@@ -304,6 +308,6 @@ Issues discovered during requirements extraction from `PACKAGE_SPEC.md`.
 | **Must** | 62 |
 | **Should** | 9 |
 | **Could** | 2 |
-| **Done (previously Won't)** | 34 |
-| **Total** | 107 |
+| **Done (previously Won't)** | 38 |
+| **Total** | 111 |
 | **Gaps found** | 14 (11 resolved, 3 open design decisions) |

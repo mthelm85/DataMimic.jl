@@ -16,7 +16,7 @@ using DataFrames
 using Dates
 using Random
 using Printf
-using Lux, Zygote
+using Lux, Zygote, LuxCUDA
 
 include("datasets.jl")
 

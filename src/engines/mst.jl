@@ -309,8 +309,10 @@ function _fit_engine(gen::MSTGenerator, cols, col_names, id_set, fill_dict,
     rho_select  = rho_total / 2
     rho_measure = rho_total / 2
 
-    eps_select   = sqrt(2.0 * rho_select)
-    eps_per_step = d > 1 ? eps_select / (d - 1) : eps_select
+    # Exponential mechanism costs ε²/8 in zCDP [Bun & Steinke 2016, Prop. 3].
+    # With (d-1) sequential selections: (d-1)·(ε_step)²/8 = ρ_select
+    #   ⟹  ε_step = √(8·ρ_select/(d-1))
+    eps_per_step = d > 1 ? sqrt(8.0 * rho_select / (d - 1)) : sqrt(8.0 * rho_select)
 
     n_meas  = max(d, 1)          # 1 root + (d-1) pairwise
     rho_per = rho_measure / n_meas

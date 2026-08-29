@@ -27,7 +27,7 @@ Version 2.0 intentionally **breaks backward compatibility** with v1.x.
 | **Phase 2 — Privacy** | `MSTGenerator`, `DPCopulaGenerator`, AutoGenerator private dispatch | v2.0-beta |
 | **Phase 3 — Deep Generative** | `DiffusionGenerator` (Lux extension): TabDDPM with multinomial diffusion for categoricals; non-private mode first, then DP-SGD | v2.0-rc |
 | **Phase 4 — Evaluation** | `DataMimic.Evaluate` submodule (fidelity, DCR, TSTR via DecisionTree.jl) | v2.0 |
-| **Phase 4b — Extended Evaluation** | Jensen–Shannon divergence, pairwise marginal error, privacy–utility sweep | v2.0.1 |
+| **Phase 4b — Extended Evaluation & GPU** | Jensen–Shannon divergence, pairwise marginal error, privacy–utility sweep, GPU acceleration for DiffusionGenerator training and sampling | v2.0.1 |
 
 **Phase 3 detail — DiffusionGenerator:**  The core TabDDPM (noise schedule,
 ResNet MLP with timestep embedding, Gaussian + multinomial diffusion,
@@ -44,6 +44,26 @@ serializes cleanly (parameters are plain NamedTuples) and is where the
 SciML ecosystem is actively investing. Start with `AutoZygote()` as the
 AD backend (Lux Tier I, most tested); swap to `AutoEnzyme()` later — it's
 a one-token change via Lux's Training API.
+
+**GPU acceleration:**  The `LuxExt` auto-detects GPU hardware via
+`Lux.gpu_device()`.  When CUDA (or Metal/AMD ROCm) is available — i.e.,
+the user has loaded `LuxCUDA` (or `Metal.jl`, `AMDGPU.jl`) before calling
+`fit()` — training data, model parameters, and optimizer state are moved
+to the GPU device.  The denoising sampling loop also runs on GPU where
+possible, with categorical posterior sampling falling back to CPU.
+Trained parameters are stored on CPU in `FittedDiffusionModel` for
+serialization portability.  No GPU package is a dependency of DataMimic
+itself — `LuxCUDA` is the user's opt-in, exactly like `Lux` and `Zygote`.
+
+```julia
+# CPU (default)
+using Lux, Zygote
+model = fit(DiffusionGenerator(), data)
+
+# GPU — just add LuxCUDA
+using Lux, Zygote, LuxCUDA
+model = fit(DiffusionGenerator(), data)  # auto-detects CUDA
+```
 
 ---
 
@@ -236,8 +256,10 @@ Port of the v1 engine with two improvements:
 
 ### 3.3 DPCopulaGenerator (Phase 2)
 
-1. Compute DP-noisy quantiles for each marginal via the smooth-sensitivity
-   quantile mechanism [Smith 2011].
+1. Compute DP-noisy marginals for each column via histogram binning with
+   calibrated Gaussian noise (zCDP). Continuous columns are binned into
+   equal-width histograms; categorical columns have their count maps
+   noised directly.
 2. Compute a **private covariance matrix** via the Analyze-Gauss mechanism
    [Dwork et al. 2014].
 3. Fit a Gaussian copula from the private covariance.
@@ -662,8 +684,11 @@ depends on it so implementers know which papers to read for which phase.
 
 - **[Smith 2011]** Smith, A. "Privacy-preserving statistical estimation
   with optimal convergence rates." *STOC 2011*, pp. 813–822.
-  — Smooth-sensitivity quantile mechanism for DP-noisy marginals.
-  Used by `DPCopulaGenerator`. `Phase 2`
+  — Smooth-sensitivity framework for private statistics. The
+  `DPCopulaGenerator` uses a simpler histogram + Gaussian noise
+  approach for marginals (rather than smooth-sensitivity quantiles),
+  which is standard practice and more robust at moderate ε.
+  Retained as a reference for the underlying theory. `Phase 2`
 
 ### Diffusion Model Synthesis (§3.4)
 

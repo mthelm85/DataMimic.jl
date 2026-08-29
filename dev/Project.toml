@@ -1,6 +1,0 @@
-[deps]
-DataMimic = "cb7d7795-550a-4968-bbdc-2a75efce1373"
-KaimonGate = "5ee84a8c-75bd-412f-a7b8-4e6463aa635f"
-
-[sources]
-DataMimic = {path = ".."}
