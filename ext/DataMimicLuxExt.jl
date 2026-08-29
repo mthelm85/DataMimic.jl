@@ -983,14 +983,14 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
     betas, alphas_cumprod = _linear_schedule(n_steps)
 
     # ── Build model ────────────────────────────────────────────────────
-    embed_dim = 128
-    hidden    = min(256, max(64, 4 * (d_num + d_cat_total)))
-    n_blocks  = 4
+    embed_dim = gen.embed_dim
+    hidden    = gen.hidden_dim > 0 ? gen.hidden_dim : min(256, max(64, 4 * (d_num + d_cat_total)))
+    n_blocks  = gen.n_blocks
     d_in      = d_num + d_cat_total   # timestep handled via addition, not concat
 
     backbone, _ = _build_model(d_in, d_num, cat_dims_v;
                                hidden = hidden, n_blocks = n_blocks,
-                               embed_dim = embed_dim, dropout = 0.0)
+                               embed_dim = embed_dim, dropout = gen.dropout)
     emb_layer = SinusoidalEmbedding(embed_dim)
 
     lux_rng = Random.MersenneTwister(42)  # deterministic init
