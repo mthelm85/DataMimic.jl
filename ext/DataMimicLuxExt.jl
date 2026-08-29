@@ -539,7 +539,16 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
     st_emb    = _to_device(st_emb, dev)
     opt_state = Optimisers.setup(Optimisers.Adam(1f-3), ps_all)
 
+    t_start    = time()
+    epoch_loss = 0.0
+    n_batches  = 0
+
+    # Progress reporting interval: ~20 updates over the full run
+    report_every = max(1, epochs ÷ 20)
+
     for epoch in 1:epochs
+        epoch_loss = 0.0
+        n_batches  = 0
         perm = Random.randperm(rng, nrows)
         for start in 1:batch_size:nrows
             stop = min(start + batch_size - 1, nrows)
@@ -576,8 +585,18 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
                                 t_batch_d, ε, d_num, cat_dims)
             end
             st_bb, st_emb = states_new
+            epoch_loss += loss
+            n_batches  += 1
 
             opt_state, ps_all = Optimisers.update(opt_state, ps_all, g)
+        end
+
+        # Progress report
+        if epoch == 1 || epoch % report_every == 0 || epoch == epochs
+            avg_loss = epoch_loss / max(n_batches, 1)
+            elapsed  = time() - t_start
+            eta      = elapsed / epoch * (epochs - epoch)
+            @info "Epoch $(epoch)/$(epochs)  loss=$(round(avg_loss; digits=4))  elapsed=$(round(Int, elapsed))s  ETA=$(round(Int, eta))s"
         end
     end
 
@@ -681,7 +700,12 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
     st_emb    = _to_device(st_emb, dev)
     opt_state = Optimisers.setup(Optimisers.Adam(1f-3), ps_all)
 
+    t_start      = time()
+    report_every = max(1, epochs ÷ 20)
+
     for epoch in 1:epochs
+        epoch_loss = 0.0
+        n_batches  = 0
         perm = Random.randperm(rng, nrows)
         for start in 1:batch_size:nrows
             stop = min(start + batch_size - 1, nrows)
@@ -708,6 +732,7 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
 
             # ── Per-sample gradient clipping ────────────────────────────
             gs_sum = _grad_zero(ps_all)
+            batch_loss = 0.0
 
             for si in 1:bs
                 xn_i  = d_num > 0 ? x_num_noised[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
@@ -716,18 +741,22 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
                 t_i_d = _to_device(Float32.([t_batch[si]]), dev)
                 ε_i   = d_num > 0 ? ε[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
 
-                _, _, g = _compute_grad(AD_BACKEND, ps_all) do p
+                l, _, g = _compute_grad(AD_BACKEND, ps_all) do p
                     _diffusion_loss(backbone, emb_layer,
                                     p.backbone, p.emb,
                                     st_bb, st_emb,
                                     xn_i, xc_i, xc_orig_i,
                                     t_i_d, ε_i, d_num, cat_dims)
                 end
+                batch_loss += l
                 gnorm = sqrt(_grad_sqnorm(g))
                 clip_factor = min(1.0, C / max(gnorm, 1e-12))
                 g_clipped = _grad_scale(g, clip_factor)
                 gs_sum = _grad_add(gs_sum, g_clipped)
             end
+
+            epoch_loss += batch_loss / bs
+            n_batches  += 1
 
             # Average and add noise
             gs_avg = _grad_scale(gs_sum, 1.0 / bs)
@@ -735,6 +764,14 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
             gs_noisy = _grad_add_noise!(gs_avg, noise_scale, rng)
 
             opt_state, ps_all = Optimisers.update(opt_state, ps_all, gs_noisy)
+        end
+
+        # Progress report
+        if epoch == 1 || epoch % report_every == 0 || epoch == epochs
+            avg_loss = epoch_loss / max(n_batches, 1)
+            elapsed  = time() - t_start
+            eta      = elapsed / epoch * (epochs - epoch)
+            @info "DP-SGD Epoch $(epoch)/$(epochs)  loss=$(round(avg_loss; digits=4))  elapsed=$(round(Int, elapsed))s  ETA=$(round(Int, eta))s"
         end
     end
 
