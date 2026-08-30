@@ -27,8 +27,11 @@ DataMimicLuxExt = ["Lux", "Zygote"]
 [compat]
 Copulas = "0.1"
 EvoTrees = "0.19"
+LinearAlgebra = "1"
 Lux = "1"
 Optimisers = "0.4"
+Random = "1"
+Serialization = "1"
 SpecialFunctions = "2"
 StatsBase = "0.34"
 Tables = "1"

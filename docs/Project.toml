@@ -1,0 +1,9 @@
+[deps]
+DataMimic = "cb7d7795-550a-4968-bbdc-2a75efce1373"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+
+[sources]
+DataMimic = {path = ".."}
+
+[compat]
+Documenter = "1"

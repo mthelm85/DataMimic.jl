@@ -1,3 +1,4 @@
 /Manifest*.toml
 **/LocalPreferences.toml
 dev/
+docs/build/

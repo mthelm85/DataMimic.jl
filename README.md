@@ -1,32 +1,41 @@
-# DataMimic
+# DataMimic.jl
 
-[![Build Status](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml/badge.svg?branch=master)](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml?query=branch%3Amaster)
-[![Coverage](https://codecov.io/gh/mthelm85/DataMimic.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/mthelm85/DataMimic.jl)
+[![CI](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml)
 
-DataMimic generates a **synthetic DataFrame** that mimics the shape, column types, and statistical distributions of an input DataFrame — without exposing any of the original records.
+Synthetic tabular data generation for Julia, with optional differential privacy.
 
-## How it works
+DataMimic fits a generative model to a table and samples new rows that preserve
+its statistical structure without copying real records. It ships four engines —
+from a fast copula to a differentially private diffusion model — behind one
+`fit` / `sample` interface, and an evaluation suite for checking that the
+output is actually any good.
 
-DataMimic fits an empirical model to your DataFrame in two stages:
-
-1. **Marginals** — each column is profiled and an empirical distribution is fitted independently (frequency table for categorical columns, sorted empirical CDF for numeric columns).
-2. **Copula** — a `BetaCopula` is fitted to the joint pseudo-observations of all numeric columns, preserving their dependence structure.
-
-When you call `sample`, DataMimic draws from the copula to get correlated uniform values, inverts each through its marginal's quantile function, re-samples categorical columns independently, and re-injects missing values at the observed rate.
+Any [Tables.jl](https://github.com/JuliaData/Tables.jl)-compatible table works
+as input, and `sample` returns the same concrete table type you passed in.
 
 ## Installation
 
 ```julia
 using Pkg
-Pkg.add("DataMimic")
+Pkg.add(url = "https://github.com/mthelm85/DataMimic.jl")
 ```
+
+`DiffusionGenerator` is provided by a package extension. To use it, load
+[Lux.jl](https://github.com/LuxDL/Lux.jl) and
+[Zygote.jl](https://github.com/FluxML/Zygote.jl) as well:
+
+```julia
+Pkg.add(["Lux", "Zygote"])
+```
+
+For GPU training, additionally load `LuxCUDA` (or `Metal.jl` / `AMDGPU.jl`) —
+DataMimic detects the device at runtime and takes no GPU dependency itself.
 
 ## Quick start
 
 ```julia
 using DataFrames, DataMimic
 
-# Your private data
 df = DataFrame(
     age    = rand(25:65, 500),
     income = randn(500) .* 15_000 .+ 55_000,
@@ -34,112 +43,182 @@ df = DataFrame(
     active = rand([true, false], 500),
 )
 
-# One-liner: fit and sample in a single call
-syn = synthesize(df, 500)
+# Let DataMimic pick an engine for you
+model = fit(AutoGenerator(), df)
+syn   = sample(model, 500)
 
-# Or keep the model for repeated sampling
-model = fit(df)
-syn1  = sample(model, 200)
-syn2  = sample(model, 1_000)
+# Or fit and sample in one call
+syn = synthesize(AutoGenerator(), df, 500)
 
-# Scramble sensitive identifier columns so real values never appear verbatim
-df2 = DataFrame(
-    ein    = ["12-3456789", "98-7654321"],   # tax IDs
+# Pick an engine explicitly
+model = fit(CopulaGenerator(:gaussian), df)
+syn   = sample(model, 1_000)
+```
+
+### With differential privacy
+
+Private engines require a `PrivacyBudget`; public engines reject one.
+
+```julia
+budget = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
+
+model = fit(MSTGenerator(), df; privacy = budget)
+syn   = sample(model, 500)
+```
+
+### Excluding identifiers
+
+Identifier columns are kept out of the statistical model entirely, so real
+values never reach the synthetic table. Give each one a `fill` spec to
+regenerate it on output — **without a fill spec the column is dropped from the
+result**.
+
+```julia
+df = DataFrame(
+    ein    = ["12-3456789", "98-7654321"],
     amount = [1200.0, 850.0],
 )
-syn3 = synthesize(df2, 100; scramble=[:ein])
+
+model = fit(CopulaGenerator(), df;
+            identifiers = [:ein],
+            fill        = Dict(:ein => :sequential))
+syn = sample(model, 100)     # ein = "ein_1", "ein_2", ...
+```
+
+A fill spec is one of:
+
+| Spec | Result |
+|---|---|
+| `:sequential` | `"<colname>_1"`, `"<colname>_2"`, … |
+| `:sequential_int` | `1`, `2`, `3`, … |
+| a `String` prefix | `"prefix_1"`, `"prefix_2"`, … |
+| a `Function` | `f(i)` for row `i` |
+
+## Engines
+
+| Generator | Private | Notes |
+|---|---|---|
+| `CopulaGenerator(:beta \| :gaussian)` | no | Fast. Copula over numeric columns; categoricals sampled independently |
+| `DiffusionGenerator(; dp = false)` | optional | TabDDPM. Highest fidelity; `dp = true` enables DP-SGD |
+| `MSTGenerator(2)` | yes | MST with Private-PGM reconciliation. Good on categorical-heavy data |
+| `DPCopulaGenerator()` | yes | DP histogram marginals + Analyze-Gauss private covariance |
+| `AutoGenerator()` | either | Dispatches to one of the above |
+
+### `AutoGenerator` dispatch
+
+Let `D` be the number of modelled columns and `N` the row count.
+
+**Without a privacy budget**
+- `D ≤ 30` → `CopulaGenerator(:beta)`
+- `D > 30` or `N > 100_000` → `DiffusionGenerator(dp = false)`
+
+**With a privacy budget**
+- `N < 20_000`, categorical fraction > 50% → `MSTGenerator(2)`
+- `N < 20_000`, categorical fraction ≤ 50% → `DPCopulaGenerator()`
+- `N ≥ 20_000`, `D > 30` → `DiffusionGenerator(dp = true)`
+- `N ≥ 20_000`, `D ≤ 30` → `MSTGenerator(2)`
+
+### Class-conditional diffusion
+
+For a classification-style table, naming the label column conditions the model
+on it. This substantially improves downstream utility, and reproduces the
+TabDDPM paper's setup.
+
+```julia
+using Lux, Zygote   # activates the extension
+
+gen = DiffusionGenerator(
+    epochs        = 3750,
+    batch_size    = 4096,
+    d_layers      = [256, 1024, 1024, 1024, 1024, 256],
+    num_timesteps = 100,
+    target        = :income_bracket,
+)
+model = fit(gen, df)
+syn   = sample(model, nrow(df))
 ```
 
 ## API
 
-### `fit(df; scramble=Symbol[]) -> SynthModel`
-
-Profiles the input DataFrame and returns a fitted `SynthModel`. No synthetic data is produced at this stage.
+### Fitting and sampling
 
 ```julia
-model = fit(df)
-
-# Mark sensitive columns for scrambling
-model = fit(df; scramble=[:ssn, :case_id])
+fit(generator, table; privacy = nothing, hints = ColumnHint[],
+                      identifiers = Symbol[], fill = Dict(),
+                      rng = Random.default_rng())
+sample(model, n; rng = model.rng)
+synthesize(generator, table, n; kw...)
 ```
 
-Columns listed in `scramble` are sampled normally, but before being returned their values are randomly rearranged character-by-character (strings) or digit-by-digit (integers), ensuring no original identifier ever appears verbatim in the synthetic output.
+- `privacy::Union{Nothing, PrivacyBudget}` — required by private generators
+- `hints::Vector{ColumnHint}` — override column type detection
+- `identifiers::Vector{Symbol}` — columns to exclude from the model
+- `fill` — how to repopulate identifier columns on output
+- `rng` — stored on the model, so sampling is reproducible
 
-### `sample(model, nrows) -> DataFrame`
-
-Draws `nrows` synthetic observations from a fitted `SynthModel`. The output has the same column names and compatible eltypes as the original DataFrame. `nrows` does not need to equal the number of rows in the original data.
+### Types
 
 ```julia
-syn = sample(model, 1_000)
+PrivacyBudget(; epsilon, delta = 1e-5)
+ColumnHint(; name, kind, levels = nothing)
 ```
 
-### `synthesize(df, nrows; scramble=Symbol[]) -> DataFrame`
+Valid `kind` values: `:continuous`, `:integer`, `:categorical`, `:binary`,
+`:constant`, `:identifier`.
 
-Convenience wrapper equivalent to `sample(fit(df; scramble=scramble), nrows)`.
+### Persistence
 
 ```julia
-syn = synthesize(df, 500)
-syn = synthesize(df, 500; scramble=[:ein, :case_id])
+save(path, model)
+model = load(path)
 ```
 
-### `SynthModel`
+Uses Julia's `Serialization`, so files are portable within a Julia version but
+may not load across versions. A version header is written and checked.
 
-The struct returned by `fit`. You can inspect it directly:
+### Evaluation
 
-| Field | Type | Description |
-|---|---|---|
-| `column_names` | `Vector{Symbol}` | Ordered column names from the input |
-| `column_types` | `Vector{Symbol}` | Detected type per column (see below) |
-| `marginals` | `Dict{Symbol, Marginal}` | Fitted marginal per column |
-| `missingness` | `Dict{Symbol, Float64}` | Observed missingness rate per column |
-| `copula` | `BetaCopula` or `Nothing` | Fitted copula, or `Nothing` if skipped |
-| `copula_columns` | `Vector{Symbol}` | Columns included in the copula |
-| `nrows_original` | `Int` | Row count of the original input |
-| `scrambled` | `Vector{Symbol}` | Columns whose sampled values are scrambled before output |
+```julia
+fidelity_score(real, synth)                       # marginal + correlation agreement
+privacy_dcr(real, synth)                          # distance to closest record
+utility_tstr(real, synth, target; test = nothing) # train-on-synthetic, test-on-real
+jensen_shannon(real, synth; n_bins = 50)
+pairwise_marginal_error(real, synth; order = 2)
+privacy_utility_sweep(generator, table, epsilons, metric_fn; kw...)
+```
+
+`fidelity_score` returns per-column scores plus an aggregate, all in `[0, 1]`
+where `0` is perfect. Numeric columns with no variance are excluded from the
+correlation term and reported in `correlation_excluded`.
+
+`utility_tstr` trains gradient-boosted trees on the synthetic data and scores
+them on real held-out data, reporting macro-F1 and a synthetic/real ratio.
 
 ## Column type detection
 
-DataMimic automatically classifies each column before fitting:
+Columns are classified as `:continuous`, `:integer`, `:categorical`,
+`:binary`, `:constant`, or `:identifier`. Detection is cardinality-aware:
+low-cardinality integers in a large sample are treated as categorical, and
+high-cardinality ones as integer. Pass a `ColumnHint` to override.
 
-| Detected type | Criteria |
-|---|---|
-| `:continuous` | `Float64`/`Float32` eltype with at least one non-integer value |
-| `:integer` | `Int` eltype, or float column where every value is a whole number |
-| `:categorical` | `String`, `Symbol`, `Bool`, or `CategoricalArray` eltype |
-| `:binary` | Any column with exactly 2 unique non-missing values |
-| `:constant` | Any column with exactly 1 unique non-missing value (or all missing) |
+## Missing values
 
-`Union{T, Missing}` eltypes are handled correctly for all types above.
+Missingness is measured per column at fit time and reintroduced at the same
+rate when sampling, so the synthetic table has a comparable missingness
+profile. Columns that are entirely missing are treated as constant.
 
-## Missing value handling
+## Reproducibility
 
-- The missingness rate of each column is recorded at fit time.
-- All marginal and copula fitting operates on non-missing values only.
-- During synthesis, missing values are re-injected independently per column at the recorded rate via Bernoulli draws.
+Pass `rng` to `fit` and it is stored on the model; `sample` uses it unless you
+pass a different one. Fitting twice with equal seeds gives identical models.
 
-## Output guarantees
+## References
 
-- Same column names and column order as the input.
-- Compatible eltypes: numeric columns preserve their original numeric type; columns with missings return `Union{T, Missing}`.
-- Categorical columns only ever contain levels seen in the original data.
-- Integer columns contain only integer-valued entries.
-- Constant columns reproduce the single original value exactly.
+Engines follow their published algorithms, cross-checked against the reference
+implementations rather than the papers alone. See
+[`references/REFERENCES.md`](references/REFERENCES.md) for the full list and
+for the specific places where this package deviates.
 
-## Warnings and edge cases
+## License
 
-DataMimic emits informative warnings rather than erroring in the following situations:
-
-| Situation | Behaviour |
-|---|---|
-| Only one numeric column | Copula is skipped; column sampled from its marginal directly |
-| No numeric columns | Copula is skipped; all columns sampled independently |
-| Column is entirely missing | Treated as a constant column with value `missing` |
-| `nrows > 10 × original` | Warning that empirical marginals will repeat observed values |
-| Scrambled column is `:constant` | Warning that scrambling a single-value column may have no effect |
-| Scrambled column is `:continuous` | Warning that digit-scrambling floats may produce unexpected values |
-
-## Dependencies
-
-- [DataFrames.jl](https://github.com/JuliaData/DataFrames.jl)
-- [Copulas.jl](https://github.com/lrnv/Copulas.jl)
-- [StatsBase.jl](https://github.com/JuliaStats/StatsBase.jl)
+MIT
