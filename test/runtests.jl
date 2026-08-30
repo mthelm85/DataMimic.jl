@@ -661,6 +661,36 @@ using Lux, Zygote
             @test all(v -> v ∈ ["x", "y", "z"], syn.a)
         end
 
+        # REQ-DPC-002: Analyze-Gauss requires a *symmetric* noise matrix whose
+        # entries each carry the calibrated variance.  Building it as
+        # (E + E')/2 from independent draws is the natural-looking mistake: it
+        # leaves the diagonal at σ² but halves every off-diagonal to σ²/2,
+        # under-noising them by √2 and breaking the privacy calibration.
+        @testset "Analyze-Gauss noise is symmetric with uniform variance" begin
+            d, reps, σ = 4, 4000, 2.0
+            rng_noise = MersenneTwister(7)
+            draw_E() = DataMimic._symmetric_gaussian_noise(d, σ, rng_noise)
+
+            @test all(E == E' for E in (draw_E() for _ in 1:20))
+
+            diag_draws = Float64[]
+            off_draws  = Float64[]
+            for _ in 1:reps
+                E = draw_E()
+                push!(diag_draws, E[1, 1])
+                push!(off_draws,  E[1, 2])
+            end
+
+            # Both must have variance σ², not σ²/2 for the off-diagonal.
+            svar = DataMimic.StatsBase.var
+            @test isapprox(svar(diag_draws), σ^2; rtol = 0.1)
+            @test isapprox(svar(off_draws),  σ^2; rtol = 0.1)
+
+            # Guard against the averaging bug specifically: it would land the
+            # off-diagonal variance near σ²/2.
+            @test !isapprox(svar(off_draws), σ^2 / 2; rtol = 0.1)
+        end
+
         @testset "reproducibility" begin
             m1 = fit(DPCopulaGenerator(), tbl; privacy = pb,
                      rng = MersenneTwister(1))
@@ -976,6 +1006,44 @@ using Lux, Zygote
                 DiffusionGenerator(; dp = false, epochs = 2),
                 tbl; privacy = pb, rng = MersenneTwister(42))
         end
+
+        # REQ-DIF-006: the accountant models the *Poisson*-subsampled
+        # Gaussian mechanism.  At q = 1 that degenerates to the plain
+        # Gaussian mechanism, whose RDP is exactly α/(2σ²) — a closed form
+        # the implementation must reproduce.
+        @testset "RDP accountant reduces to the Gaussian mechanism at q=1" begin
+            ext = Base.get_extension(DataMimic, :DataMimicLuxExt)
+            σ, δ = 2.0, 1e-5
+            alphas = vcat(collect(2:10), collect(12:2:64), [128, 256])
+            analytic = minimum(a / (2σ^2) + log(1 / δ) / (a - 1) for a in alphas)
+            @test ext._rdp_accountant(σ, 1.0, 1, δ) ≈ analytic
+
+            # ε must grow with the sampling rate and the number of steps,
+            # and shrink as noise is added.
+            @test issorted([ext._rdp_accountant(s, 0.01, 1000, δ)
+                            for s in (0.5, 1.0, 2.0, 4.0)]; rev = true)
+            @test issorted([ext._rdp_accountant(1.0, q, 1000, δ)
+                            for q in (0.001, 0.01, 0.1, 0.5)])
+            @test issorted([ext._rdp_accountant(1.0, 0.01, t, δ)
+                            for t in (10, 100, 1000, 10_000)])
+        end
+
+        # REQ-DIF-005: Poisson subsampling produces variable lot sizes, and
+        # an empty lot is a legitimate outcome that must still take a noisy
+        # step.  n=8 with batch_size=1 gives q=0.125, so P(empty) ≈ 0.34 per
+        # step — over 16 steps an empty lot is effectively certain.
+        @testset "Poisson subsampling tolerates empty lots" begin
+            small = (; x = randn(MersenneTwister(7), Float32, 8),
+                       c = rand(MersenneTwister(8), ["a", "b"], 8))
+            model = fit(DiffusionGenerator(; dp = true, epochs = 2,
+                                             batch_size = 1, num_timesteps = 10,
+                                             hidden_dim = 8, n_blocks = 1),
+                        small; privacy = pb, rng = MersenneTwister(42))
+            @test model isa FittedDiffusionModel
+            syn = sample(model, 5)
+            @test length(syn.x) == 5
+            @test all(c -> c ∈ ["a", "b"], syn.c)
+        end
     end
 
     # ════════════════════════════════════════════════════════════════════════
@@ -1067,6 +1135,46 @@ using Lux, Zygote
             @testset "no shared columns → error" begin
                 other = (; z = randn(50))
                 @test_throws ArgumentError fidelity_score(real_tbl, other)
+            end
+
+            # REQ-EVL-003: a zero-variance column has no rank spread, so every
+            # Spearman correlation involving it is 0/0.  Left unhandled, one
+            # such column turns the correlation matrix — and through it the
+            # headline aggregate — into NaN, even though each per-column score
+            # computed fine.  Constant columns are common in real tables, so a
+            # silent NaN here is a wrong answer rather than an edge case.
+            @testset "constant column does not poison the score" begin
+                n = 200
+                rng_c = MersenneTwister(11)
+                r = (; a = randn(rng_c, n), b = randn(rng_c, n), c = fill(1.0, n))
+                s = (; a = randn(rng_c, n), b = randn(rng_c, n), c = fill(1.0, n))
+
+                fs = fidelity_score(r, s)
+                @test !isnan(fs.aggregate)
+                @test !isnan(fs.correlation_score)
+
+                # The constant column is still scored on its own …
+                @test haskey(fs.column_scores, :c)
+                @test fs.column_scores[:c] ≈ 0.0 atol = 1e-10
+                # … and only dropped from the correlation term.
+                @test :c in fs.correlation_excluded
+                @test Set(fs.correlation_columns) == Set([:a, :b])
+
+                # An all-constant table leaves nothing to correlate, which must
+                # degrade gracefully to the 1-D mean rather than to NaN.
+                r2 = (; a = fill(2.0, n), b = fill(5.0, n))
+                fs2 = fidelity_score(r2, r2)
+                @test !isnan(fs2.aggregate)
+                @test fs2.correlation_score == 0.0
+                @test isempty(fs2.correlation_columns)
+
+                # A column constant in only one of the two tables also counts
+                # as degenerate — the ranks are undefined on that side.
+                r3 = (; a = randn(rng_c, n), b = randn(rng_c, n))
+                s3 = (; a = randn(rng_c, n), b = fill(3.0, n))
+                fs3 = fidelity_score(r3, s3)
+                @test !isnan(fs3.aggregate)
+                @test :b in fs3.correlation_excluded
             end
 
             @testset "non-table → error" begin

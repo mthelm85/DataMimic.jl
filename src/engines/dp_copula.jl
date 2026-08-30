@@ -134,12 +134,33 @@ end
 # ─── Private covariance copula (Analyze-Gauss) ───────────────────────────
 
 """
-Build a Gaussian copula from a private covariance matrix.
+Build a Gaussian copula from a private second-moment matrix (Analyze-Gauss,
+[Dwork et al. 2014]).
 
-1. Rank-transform data to [0,1] via the DP marginal CDF (post-processing).
-2. Compute sample covariance.
-3. Add Gaussian noise (Analyze-Gauss).
+1. Rank-transform data to [0,1] via the DP marginal CDF.  The marginals are
+   already private, so this is post-processing and costs no budget.
+2. Form the **uncentered** second-moment matrix `M = XᵀX / n`.
+3. Add symmetric Gaussian noise calibrated to `rho_cov`.
 4. Project to a valid correlation matrix and construct a `GaussianCopula`.
+
+# Sensitivity
+
+Analyze-Gauss calibrates to the Frobenius sensitivity of the released matrix.
+Replacing one record `x` with `x′`, both in `[0,1]^d`, changes `M` by
+
+    ΔM = (x xᵀ − x′ x′ᵀ) / n,   ‖ΔM‖_F ≤ (‖x‖² + ‖x′‖²) / n ≤ 2d / n
+
+and for the add/remove-one neighbouring relation used here a single record
+contributes `‖x xᵀ‖_F = ‖x‖² ≤ d`, giving `‖ΔM‖_F ≤ d / n`.  That is the bound
+applied below.
+
+The matrix is deliberately **not** mean-centered.  Centering by a sample mean
+computed from the raw data would leak: the mean is data-dependent and released
+implicitly through the centered matrix, and the `d / n` bound above does not
+account for it.  Privatizing the mean separately would require splitting
+`rho_cov`; releasing uncentered second moments avoids the question entirely and
+is the form the cited mechanism analyses.  Since the columns are marginal CDF
+values in `[0,1]`, `_project_correlation` rescales to unit diagonal afterwards.
 """
 function _fit_dp_covariance_copula(cols, copula_columns::Vector{Symbol},
                                    marginals::Dict{Symbol, DPMarginal}, nrows::Int,
@@ -170,17 +191,15 @@ function _fit_dp_covariance_copula(cols, copula_columns::Vector{Symbol},
         return nothing
     end
 
-    # Sample covariance
-    mu   = vec(sum(Xc, dims = 1)) / nc
-    Xc_c = Xc .- mu'
-    Sigma = (Xc_c' * Xc_c) / nc
+    # Uncentered second-moment matrix (see the sensitivity note above — the
+    # sample mean is data-dependent and centering by it would leak).
+    Sigma = (Xc' * Xc) / nc
 
-    # Analyze-Gauss noise — data in [0,1]^d ⇒ sensitivity ≤ d/n
+    # Analyze-Gauss noise — data in [0,1]^d ⇒ Frobenius sensitivity ≤ d/n
     sens = Float64(d) / nc
     sigma_noise = _rho_to_sigma(rho_cov, sens)
-    E = randn(rng, d, d) .* sigma_noise
-    E = (E + E') / 2                    # symmetrize
-    Sigma_noisy = Sigma + E
+
+    Sigma_noisy = Sigma + _symmetric_gaussian_noise(d, sigma_noise, rng)
 
     C = _project_correlation(Sigma_noisy)
 

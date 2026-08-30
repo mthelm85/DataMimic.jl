@@ -55,9 +55,18 @@ CopulaGenerator() = CopulaGenerator(:beta)
 """
     MSTGenerator(max_marginal_order::Int=2)
 
-Private synthetic data via MST (McKenna et al. 2021): exponential-mechanism
-marginal selection → Gaussian noise → junction tree → belief propagation.
-Satisfies (ε,δ)-DP via zCDP composition.
+Private synthetic data via a simplified tree-structured variant of MST
+(McKenna et al. 2021): exponential-mechanism spanning-tree selection over
+columns → Gaussian-noise measurement of the root 1-way marginal and the
+tree's 2-way marginals → ancestral sampling from the resulting
+`P(child | parent)` conditionals.  Satisfies (ε,δ)-DP via zCDP composition.
+
+Unlike the published algorithm this does **not** run Private-PGM inference and
+measures only the root 1-way marginal; see the divergence note under
+REQ-MST-007 in REQUIREMENTS.md.
+
+`max_marginal_order = 3` is accepted but not implemented — it warns and falls
+back to 2-way marginals.
 """
 struct MSTGenerator <: AbstractPrivateGenerator
     max_marginal_order::Int
@@ -79,10 +88,36 @@ Suited for continuous-heavy tables under moderate ε.
 struct DPCopulaGenerator <: AbstractPrivateGenerator end
 
 """
-    DiffusionGenerator(; dp=false, epochs=100, batch_size=512)
+    DiffusionGenerator(; dp=false, epochs=100, batch_size=512, target=nothing)
 
-TabDDPM with optional DP-SGD. Requires the `LuxExt` package extension
-(`using Lux, Zygote` before calling `fit`).
+TabDDPM [Kotelnikov et al. 2023] with optional DP-SGD.  Requires the `LuxExt`
+package extension (`using Lux, Zygote` before calling `fit`).
+
+Architecture and training follow the reference implementation: a plain MLP
+denoiser (`Linear → ReLU → Dropout` blocks) with additive sinusoidal timestep
+conditioning, a cosine β schedule, Gaussian diffusion on numeric features and
+multinomial diffusion on categoricals, AdamW with linear learning-rate
+annealing, and an exponential moving average of the denoiser weights used for
+sampling.
+
+# Keyword arguments
+- `target`: name of the label column for class-conditional generation
+  (the paper's `is_y_cond=true`).  When set, the denoiser is conditioned on an
+  embedding of the label and sampling first draws labels from the empirical
+  class distribution.  When `nothing`, the model is unconditional and the label,
+  if any, is modelled as an ordinary categorical column.
+- `hidden_dim`: width of each MLP block (0 = auto).
+- `n_blocks`: number of MLP blocks.
+- `d_layers`: explicit per-layer widths, e.g. `[256, 1024, 1024, 256]`.  When
+  non-empty this overrides `hidden_dim`/`n_blocks`, matching the paper's
+  per-dataset tuned architectures.
+- `num_timesteps`: length of the diffusion process (the paper tunes this;
+  its Adult configuration uses 100).
+- `embed_dim`: timestep-embedding width (the paper's `dim_t`).
+- `lr`, `weight_decay`: AdamW parameters.
+- `lr_warmup`: linear warmup epochs prepended to the annealing schedule
+  (0 = the paper's plain linear anneal).
+- `ema_decay`: EMA rate for the sampling weights (0 disables EMA).
 """
 Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
     dp::Bool           = false
@@ -90,22 +125,33 @@ Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
     batch_size::Int    = 512
     hidden_dim::Int    = 0      # 0 = auto: min(256, max(64, 4·d_features))
     n_blocks::Int      = 4
-    embed_dim::Int     = 128
+    d_layers::Vector{Int} = Int[]   # explicit widths; overrides hidden_dim/n_blocks
+    num_timesteps::Int = 1000
+    embed_dim::Int     = 128    # dim_t in the reference implementation
     dropout::Float64   = 0.0
-    lr::Float64        = 1e-3   # peak learning rate
+    lr::Float64        = 1e-3
     lr_warmup::Int     = 0      # linear warmup epochs (0 = no warmup)
+    weight_decay::Float64 = 1e-4
+    ema_decay::Float64 = 0.999  # 0 = disable EMA
+    target::Union{Symbol, Nothing} = nothing   # class-conditional label column
 
     function DiffusionGenerator(dp, epochs, batch_size, hidden_dim, n_blocks,
-                                embed_dim, dropout, lr, lr_warmup)
+                                d_layers, num_timesteps, embed_dim, dropout, lr,
+                                lr_warmup, weight_decay, ema_decay, target)
         epochs > 0     || throw(ArgumentError("epochs must be positive, got $epochs"))
         batch_size > 0 || throw(ArgumentError("batch_size must be positive, got $batch_size"))
         hidden_dim >= 0 || throw(ArgumentError("hidden_dim must be non-negative, got $hidden_dim"))
         n_blocks > 0   || throw(ArgumentError("n_blocks must be positive, got $n_blocks"))
+        all(>(0), d_layers) || throw(ArgumentError("d_layers must be all positive, got $d_layers"))
+        num_timesteps > 0 || throw(ArgumentError("num_timesteps must be positive, got $num_timesteps"))
         embed_dim > 0  || throw(ArgumentError("embed_dim must be positive, got $embed_dim"))
         0.0 <= dropout < 1.0 || throw(ArgumentError("dropout must be in [0,1), got $dropout"))
         lr > 0         || throw(ArgumentError("lr must be positive, got $lr"))
         lr_warmup >= 0 || throw(ArgumentError("lr_warmup must be non-negative, got $lr_warmup"))
-        new(dp, epochs, batch_size, hidden_dim, n_blocks, embed_dim, dropout, lr, lr_warmup)
+        weight_decay >= 0 || throw(ArgumentError("weight_decay must be non-negative, got $weight_decay"))
+        0.0 <= ema_decay < 1.0 || throw(ArgumentError("ema_decay must be in [0,1), got $ema_decay"))
+        new(dp, epochs, batch_size, hidden_dim, n_blocks, d_layers, num_timesteps,
+            embed_dim, dropout, lr, lr_warmup, weight_decay, ema_decay, target)
     end
 end
 
@@ -269,13 +315,17 @@ struct FittedDiffusionModel{L, P, S, Mat} <: AbstractFittedModel
     # Preprocessing metadata
     num_columns::Vector{Symbol}          # numeric columns in model order
     cat_columns::Vector{Symbol}          # categorical columns in model order
-    num_means::Vector{Float32}           # per-column mean (for z-score)
-    num_stds::Vector{Float32}            # per-column std  (for z-score)
+    num_references::Vector{Vector{Float32}}  # sorted training values per numeric column (quantile transform)
     cat_levels::Dict{Symbol, Vector}     # column → sorted levels
     cat_dims::Vector{Int}                # one-hot width per cat column
+    num_round::Vector{Bool}              # round to integers on inverse transform
+    # Class conditioning (nothing = unconditional)
+    target::Union{Symbol, Nothing}       # label column, or nothing
+    target_levels::Vector                # label values in model order
+    class_dist::Vector{Float64}          # empirical class distribution
     # Trained neural network (Lux)
     lux_model::L                         # Lux model (backbone + embedding)
-    trained_params::P                    # trained NamedTuple params
+    trained_params::P                    # EMA params when EMA enabled, else raw
     model_state::S                       # Lux state
     # Diffusion schedule
     n_steps::Int

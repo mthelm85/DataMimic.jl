@@ -170,7 +170,7 @@ a later phase.
 |----|-------------|--------|-------|
 | **REQ-CPL-001** | `CopulaGenerator` shall fit independent empirical marginals (sorted non-missing values) for each numeric column. | Must | 1 |
 | **REQ-CPL-002** | `CopulaGenerator(:beta)` shall fit a `BetaCopula` to model joint dependencies among numeric columns. | Must | 1 |
-| **REQ-CPL-003** | `CopulaGenerator(:gaussian)` shall fit a Gaussian copula via Spearman rank correlation → Pearson conversion. | Should | 1 |
+| **REQ-CPL-003** | `CopulaGenerator(:gaussian)` shall fit a Gaussian copula to the pseudo-observations via `Copulas.jl`, which defaults to maximum likelihood on normal scores (`:mle`). Rank-inversion methods (`:irho` Spearman, `:itau` Kendall) are available in `Copulas.jl` but are not currently selected. | Should | 1 |
 | **REQ-CPL-004** | IF fewer than 2 numeric (non-identifier) columns exist, THEN `CopulaGenerator` shall emit `@warn` and fall back to independent sampling. | Must | 1 |
 | **REQ-CPL-005** | IF fewer than 2 complete cases exist across all numeric columns, THEN `CopulaGenerator` shall emit `@warn` and fall back to independent sampling. | Must | 1 |
 | **REQ-CPL-006** | `CopulaGenerator` shall sample `:categorical` and `:binary` columns independently from their empirical probability distributions. | Must | 1 |
@@ -185,12 +185,58 @@ a later phase.
 | ID | Requirement | MoSCoW | Phase |
 |----|-------------|--------|-------|
 | **REQ-MST-001** | `MSTGenerator` shall discretize continuous columns into `k`-bin histograms (default `k = 32`). | Done | 2 |
-| **REQ-MST-002** | `MSTGenerator` shall select informative marginals via the exponential mechanism \[McKenna et al. 2021\]. | Done | 2 |
+| **REQ-MST-002** | `MSTGenerator` shall select a spanning tree over columns via the exponential mechanism \[McKenna et al. 2021\]. | Done | 2 |
 | **REQ-MST-003** | `MSTGenerator` shall measure selected marginals with calibrated Gaussian noise satisfying (ε,δ)-DP via zCDP composition \[Bun & Steinke 2016\]. | Done | 2 |
-| **REQ-MST-004** | `MSTGenerator` shall construct a junction tree over selected marginal cliques. | Done | 2 |
-| **REQ-MST-005** | `MSTGenerator` shall estimate the joint distribution via belief propagation on the junction tree. | Done | 2 |
+| **REQ-MST-004** | `MSTGenerator` shall construct a spanning tree over columns and store it as parent→child edges. | Done | 2 |
+| **REQ-MST-005** | `MSTGenerator` shall estimate the joint distribution as a tree-structured factorization — a noisy root marginal plus noisy `P(child \| parent)` conditionals — sampled ancestrally. | Done | 2 |
 | **REQ-MST-006** | `MSTGenerator` shall un-discretize continuous columns when sampling synthetic rows. | Done | 2 |
-| **REQ-MST-007** | `MSTGenerator` shall support 2-way and 3-way marginals via the `max_marginal_order` parameter. | Done | 2 |
+| **REQ-MST-007** | `MSTGenerator` shall accept `max_marginal_order ∈ {2, 3}`; 3-way marginals are **not implemented** and fall back to 2-way with a warning. | Partial | 2 |
+
+> **Divergence from \[McKenna et al. 2021\].**  `MSTGenerator` implements a
+> *simplified tree-structured variant* of MST, not the published algorithm.
+> Checked against the reference implementation (`ryan112358/private-pgm`,
+> `mechanisms/mst.py`), the differences are:
+>
+> 1. **No PGM inference.** The reference reconciles all noisy measurements with
+>    Private-PGM (Mirror Descent) \[McKenna et al. 2019\]; this engine
+>    row-normalizes the noisy 2-way counts into conditionals directly.  The tree
+>    factorization is exact, but the measurements are never made mutually
+>    consistent.
+> 2. **Only the root 1-way marginal is measured.** The reference measures all
+>    *d* 1-way marginals and supplies them to PGM alongside the 2-way ones.
+> 3. **Selection score is mutual information** on the raw data; the reference
+>    scores candidate edges by the L1 error between the true 2-way marginal and
+>    PGM's current estimate.  Note the exponential mechanism is invoked with
+>    `sensitivity = 1.0`, which is correct for the reference's L1 score but is
+>    **not derived** for mutual information.
+> 4. **No domain compression.** The reference merges bins below `3σ` into a
+>    single "other" category before selection.
+> 5. **Budget split** is ½ selection / ½ measurement, against the reference's
+>    ⅓ selection / ⅓ 1-way / ⅓ 2-way.  Both are valid zCDP compositions.
+>
+> **Fixed — selection used to be effectively random.**  The exponential
+> mechanism weights candidates by `exp(ε·q/(2Δ))`, so its ability to
+> discriminate depends on the *absolute* spread of the score.  The original
+> mutual-information score is measured in nats and spans a few tenths whatever
+> the dataset size; with `ε_step = √(8·ρ_select/(d−1)) ≈ 0.03` on a 15-column
+> table, every candidate landed within `exp(0.005)` of every other and the
+> spanning tree was a uniform random draw.  Confirmed at the time by swapping
+> the score function and getting **bit-identical** output at every ε.
+>
+> Scoring on the **count** scale — `‖M_ab(D) − ŷ_a ⊗ ŷ_b / n‖₁` against the
+> noisy 1-way marginals, sensitivity 2 — makes the spread grow with `n`, which
+> is what the reference implementation does.  The TSTR ratio now rises with the
+> privacy budget (0.767 → 0.799 over ε ∈ [0.5, 8]) where it was previously flat
+> at ≈0.79: extra budget had been buying nothing.  See `benchmark/eval_mst.jl`
+> for before/after tables and for the seed-variance caveat at low ε.
+>
+> Still outstanding: PGM reconciliation and domain compression.  A prototype of
+> the former (belief propagation + entropic mirror descent, BP verified exact
+> against brute-force enumeration) improved marginal fidelity but dropped TSTR
+> to ≈0.68.  It was built on top of the old random-selection behaviour, so it
+> is worth re-testing now that selection works — reconciliation cannot help
+> when the tree it propagates over is arbitrary.  Preserved at
+> `dev/mst-pgm-wip.patch`.
 
 ---
 
@@ -209,11 +255,11 @@ a later phase.
 | ID | Requirement | MoSCoW | Phase |
 |----|-------------|--------|-------|
 | **REQ-DIF-001** | `DiffusionGenerator` shall implement the TabDDPM architecture \[Kotelnikov et al. 2023\]. | Done | 3 |
-| **REQ-DIF-002** | `DiffusionGenerator` shall use Gaussian diffusion for numerical features \[Ho et al. 2020\]. | Done | 3 |
-| **REQ-DIF-003** | `DiffusionGenerator` shall use multinomial diffusion for categorical features \[Hoogeboom et al. 2021\]. | Done | 3 |
-| **REQ-DIF-004** | `DiffusionGenerator` shall use a ResNet-style MLP with sinusoidal timestep embedding as the denoising backbone. | Done | 3 |
-| **REQ-DIF-005** | WHEN `dp=true`, `DiffusionGenerator` shall train using DP-SGD with per-sample gradient clipping and Gaussian noise injection \[Abadi et al. 2016\]. | Done | 3 |
-| **REQ-DIF-006** | WHILE `dp=true`, `DiffusionGenerator` shall track cumulative privacy spend via Rényi DP accounting \[Mironov 2017\]. | Done | 3 |
+| **REQ-DIF-002** | `DiffusionGenerator` shall use Gaussian diffusion for numerical features \[Ho et al. 2020\], with the ε parametrization, an MSE objective, and a cosine β schedule \[Nichol & Dhariwal 2021\]. | Done | 3 |
+| **REQ-DIF-003** | `DiffusionGenerator` shall use multinomial diffusion for categorical features \[Hoogeboom et al. 2021\], carrying categorical state in log space and training against the stochastic variational bound (`L_t / p_t + KL_prior`, normalized by the number of categorical features) under the `x0` parametrization. | Done | 3 |
+| **REQ-DIF-004** | `DiffusionGenerator` shall use the TabDDPM `MLPDiffusion` backbone: a plain MLP of `Dense → ReLU → Dropout` blocks (no normalization, no residual connections) with a sinusoidal timestep embedding added once at the input projection. | Done | 3 |
+| **REQ-DIF-005** | WHEN `dp=true`, `DiffusionGenerator` shall train using DP-SGD with per-sample gradient clipping and Gaussian noise injection \[Abadi et al. 2016\]. Lots shall be drawn by **Poisson subsampling** — each record included independently with probability `q = batch_size / n`, giving variable (possibly empty) lot sizes — so that the sampling mechanism matches the one the accountant models, and both the gradient average and the noise scale shall be normalized by the *expected* lot size `q · n` rather than the realized one. | Done | 3 |
+| **REQ-DIF-006** | WHILE `dp=true`, `DiffusionGenerator` shall track cumulative privacy spend via Rényi DP accounting for the Poisson-subsampled Gaussian mechanism \[Mironov 2017\], \[Mironov et al. 2019\]. The reported ε shall be a valid **upper bound** on the true spend: the closed-form RDP is exact at each integer order, but the order search is over a finite integer grid and the RDP → (ε, δ) conversion is the standard \[Mironov 2017, Prop. 3\] bound, both of which err conservatively. | Done | 3 |
 | **REQ-DIF-007** | `DiffusionGenerator` shall be implemented as a Lux.jl package extension (`LuxExt`). | Done | 3 |
 | **REQ-DIF-008** | IF `DiffusionGenerator` is requested and `Lux.jl` is not loaded, THEN `fit()` shall throw `ErrorException` with the message `"DiffusionGenerator requires Lux.jl. Run \`using Lux\` before calling fit."`. | Done | 3 |
 | **REQ-DIF-009** | The `LuxExt` shall use `AutoZygote()` as the initial AD backend, with the architecture structured so switching to `AutoEnzyme()` is a single-token change. | Done | 3 |
@@ -221,8 +267,12 @@ a later phase.
 | **REQ-DIF-011** | WHEN training completes on GPU, the `LuxExt` shall move trained parameters back to CPU before storing them in `FittedDiffusionModel`. | Done | 4b |
 | **REQ-DIF-012** | WHEN sampling from a `FittedDiffusionModel`, the `LuxExt` shall move the model to the available device for the denoising loop, then move results back to CPU for post-processing. | Done | 4b |
 | **REQ-DIF-013** | GPU support shall not introduce any new dependencies on DataMimic — `LuxCUDA` is the user's opt-in, detected at runtime. | Done | 4b |
-| **REQ-DIF-014** | `DiffusionGenerator` shall use cosine-decay learning rate scheduling with optional linear warmup, controlled by `lr` (peak rate) and `lr_warmup` (warmup epochs). | Done | 4b |
-| **REQ-DIF-015** | `DiffusionGenerator` shall expose network architecture hyperparameters (`hidden_dim`, `n_blocks`, `embed_dim`, `dropout`) for user tuning, with sensible defaults matching TabDDPM [Kotelnikov et al. 2023]. | Done | 4b |
+| **REQ-DIF-014** | `DiffusionGenerator` shall anneal the learning rate linearly to zero (`lr · (1 - step/total)`), matching the reference trainer, with `lr_warmup` optionally prepending a linear warmup. | Done | 4b |
+| **REQ-DIF-015** | `DiffusionGenerator` shall expose network architecture hyperparameters (`d_layers`, `hidden_dim`, `n_blocks`, `embed_dim`, `dropout`, `num_timesteps`) for user tuning, with sensible defaults matching TabDDPM [Kotelnikov et al. 2023]. | Done | 4b |
+| **REQ-DIF-016** | `DiffusionGenerator` shall apply Gaussian quantile normalization to continuous features before training (empirical CDF → Φ⁻¹) and the inverse transform during sampling, matching TabDDPM §4.1 [Kotelnikov et al. 2023]. | Done | 4b |
+| **REQ-DIF-017** | WHEN `target` names a column, `DiffusionGenerator` shall train class-conditionally — adding `silu(label_emb(y))` to the timestep embedding — and sampling shall draw labels from the empirical class distribution before generating features conditioned on them. WHEN `target` is `nothing`, the model shall be unconditional. | Done | 4c |
+| **REQ-DIF-018** | `DiffusionGenerator` shall optimize with AdamW (`weight_decay`) and shall maintain an exponential moving average of the denoiser weights (`ema_decay`), using the EMA weights for sampling. | Done | 4c |
+| **REQ-DIF-019** | `sample(::FittedDiffusionModel, n)` shall run the full `num_timesteps` DDPM reverse process, using the Gaussian posterior mean/variance for numeric features and the multinomial posterior with Gumbel-max draws for categoricals. | Done | 4c |
 
 ---
 
@@ -244,7 +294,7 @@ a later phase.
 |----|-------------|--------|-------|
 | **REQ-EVL-001** | `fidelity_score(real, synth)` shall compute per-column Kolmogorov–Smirnov statistics for continuous columns. | Done | 4 |
 | **REQ-EVL-002** | `fidelity_score(real, synth)` shall compute per-column Total Variation Distance for categorical columns. | Done | 4 |
-| **REQ-EVL-003** | `fidelity_score(real, synth)` shall compute the Frobenius norm of the difference between real and synthetic pairwise Spearman correlation matrices. | Done | 4 |
+| **REQ-EVL-003** | `fidelity_score(real, synth)` shall compute the Frobenius norm of the difference between real and synthetic pairwise Spearman correlation matrices, excluding numeric columns with fewer than two distinct finite values in either table (their ranks are constant, so every correlation involving them is `0/0`). Excluded columns are still scored individually and are reported in `correlation_excluded`. | Done | 4 |
 | **REQ-EVL-004** | `fidelity_score` shall return a `NamedTuple` containing per-column scores, a 2D correlation score, and a weighted aggregate. | Done | 4 |
 | **REQ-EVL-005** | `privacy_dcr(real, synth)` shall compute the Distance to Closest Record for every synthetic row. | Done | 4 |
 | **REQ-EVL-006** | `privacy_dcr` shall return a `NamedTuple` containing the DCR vector, its median, its 5th-percentile, and a count of exact matches (DCR = 0). | Done | 4 |

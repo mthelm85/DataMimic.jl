@@ -88,7 +88,57 @@ function _mutual_info(col_i::Vector{Int}, col_j::Vector{Int},
     return mi
 end
 
+# ─── Noisy 1-way measurement ─────────────────────────────────────────────
+
+"""Noisy 1-way count vector for a discretized column (0 = missing)."""
+function _count_oneway_noisy(col::Vector{Int}, k::Int, sigma::Float64,
+                             rng::AbstractRNG)
+    c = zeros(k)
+    for v in col
+        v > 0 && (c[v] += 1.0)
+    end
+    return c .+ randn(rng, k) .* sigma
+end
+
 # ─── MST tree selection via exponential mechanism ─────────────────────────
+
+"""
+Score a candidate edge by how far the pair's true 2-way marginal sits from what
+independence would predict — on the **count** scale, following the reference
+implementation.
+
+    q(a, b) = ‖ M_ab(D) − ŷ_a ⊗ ŷ_b / n ‖₁
+
+`ŷ` are the *noisy* 1-way marginals, so the reference point is fixed given the
+already-released measurements and the score depends on the data only through
+`M_ab`.  Changing one record moves one cell of `M_ab` out and another in, so
+the L1 sensitivity is exactly 2.
+
+The count scale is essential and is where the previous mutual-information score
+went wrong.  The exponential mechanism weights candidates by `exp(ε·q/(2Δ))`,
+so discrimination depends on the *absolute* spread of `q`.  Mutual information
+is measured in nats and spans a few tenths regardless of `n`; with
+`ε_step ≈ 0.03` on a 15-column table, that put every candidate within
+`exp(0.005)` of every other and made selection a uniform random draw.  Scoring
+on counts scales the spread with `n`, which is what makes the mechanism able to
+tell candidate edges apart at all.
+"""
+function _edge_scores(disc_data::Vector{Vector{Int}}, n_bins::Vector{Int},
+                      oneway_noisy::Vector{Vector{Float64}}, nrows::Int)
+    d = length(disc_data)
+    S = zeros(d, d)
+    for i in 1:d, j in (i + 1):d
+        ct  = zeros(n_bins[i], n_bins[j])
+        for r in 1:nrows
+            @inbounds a, b = disc_data[i][r], disc_data[j][r]
+            (a > 0 && b > 0) && (ct[a, b] += 1.0)
+        end
+        # Independence reference built from the noisy 1-way counts.
+        est = (oneway_noisy[i] * oneway_noisy[j]') ./ max(nrows, 1)
+        S[i, j] = S[j, i] = sum(abs, ct .- est)
+    end
+    return S
+end
 
 """
 Select a spanning tree over `d` discretized columns using Prim's
@@ -97,17 +147,12 @@ Returns `(tree_edges, root)`.
 """
 function _select_mst_tree(disc_data::Vector{Vector{Int}},
                           n_bins::Vector{Int}, nrows::Int,
+                          oneway_noisy::Vector{Vector{Float64}},
                           eps_per_step::Float64, rng::AbstractRNG)
     d = length(disc_data)
     d == 1 && return Tuple{Int,Int}[], 1
 
-    # Pre-compute pairwise MI
-    MI = zeros(d, d)
-    for i in 1:d, j in (i+1):d
-        mi = _mutual_info(disc_data[i], disc_data[j],
-                          n_bins[i], n_bins[j], nrows)
-        MI[i, j] = MI[j, i] = mi
-    end
+    S = _edge_scores(disc_data, n_bins, oneway_noisy, nrows)
 
     in_tree = falses(d)
     root = rand(rng, 1:d)
@@ -122,11 +167,13 @@ function _select_mst_tree(disc_data::Vector{Vector{Int}},
             for j in 1:d
                 in_tree[j] && continue
                 push!(cands, (i, j))
-                push!(scores, MI[i, j])
+                push!(scores, S[i, j])
             end
         end
         isempty(cands) && break
-        sel = _exponential_mechanism(scores, eps_per_step, 1.0, rng)
+        # Sensitivity 2: one record moves one cell of the 2-way marginal out
+        # and another in, changing the L1 norm by at most 2.
+        sel = _exponential_mechanism(scores, eps_per_step, 2.0, rng)
         parent, child = cands[sel]
         push!(tree_edges, (parent, child))
         in_tree[child] = true
@@ -305,21 +352,35 @@ function _fit_engine(gen::MSTGenerator, cols, col_names, id_set, fill_dict,
     end
 
     # ── Budget allocation (zCDP) ────────────────────────────────────────
+    #
+    # Three ways, as in [McKenna et al. 2021]: selection, the 1-way marginals
+    # that anchor the selection score, and the 2-way marginals on the chosen
+    # edges.  zCDP composes additively across all of them.
+    # The 1-way marginals serve only as the independence reference for the
+    # selection score, so they are given a small share: a coarse reference is
+    # enough to rank candidate edges, and the budget is far more valuable in
+    # the 2-way marginals that become the sampling conditionals.
     rho_total   = _eps_delta_to_rho(privacy.epsilon, privacy.delta)
-    rho_select  = rho_total / 2
-    rho_measure = rho_total / 2
+    rho_select  = 0.30 * rho_total
+    rho_oneway  = 0.20 * rho_total
+    rho_measure = 0.50 * rho_total
 
     # Exponential mechanism costs ε²/8 in zCDP [Bun & Steinke 2016, Prop. 3].
     # With (d-1) sequential selections: (d-1)·(ε_step)²/8 = ρ_select
     #   ⟹  ε_step = √(8·ρ_select/(d-1))
     eps_per_step = d > 1 ? sqrt(8.0 * rho_select / (d - 1)) : sqrt(8.0 * rho_select)
 
+    # ── Measure 1-way marginals (anchor for the selection score) ────────
+    sigma_oneway = _rho_to_sigma(rho_oneway / max(d, 1), 1.0)
+    oneway_noisy = [_count_oneway_noisy(disc_data_vecs[i], bins_per_col[i],
+                                        sigma_oneway, rng) for i in 1:d]
+
     n_meas  = max(d, 1)          # 1 root + (d-1) pairwise
     rho_per = rho_measure / n_meas
 
     # ── Select spanning tree ────────────────────────────────────────────
     tree_edges, root = _select_mst_tree(disc_data_vecs, bins_per_col,
-                                         nrows, eps_per_step, rng)
+                                         nrows, oneway_noisy, eps_per_step, rng)
 
     # ── Noisy measurement ───────────────────────────────────────────────
     root_marginal, conditionals = _measure_mst(disc_data_vecs, bins_per_col,

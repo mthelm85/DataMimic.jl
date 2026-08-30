@@ -29,11 +29,19 @@ Version 2.0 intentionally **breaks backward compatibility** with v1.x.
 | **Phase 4 — Evaluation** | `DataMimic.Evaluate` submodule (fidelity, DCR, TSTR via EvoTrees.jl) | v2.0 |
 | **Phase 4b — Extended Evaluation & GPU** | Jensen–Shannon divergence, pairwise marginal error, privacy–utility sweep, GPU acceleration for DiffusionGenerator training and sampling | v2.0.1 |
 
-**Phase 3 detail — DiffusionGenerator:**  The core TabDDPM (noise schedule,
-ResNet MLP with timestep embedding, Gaussian + multinomial diffusion,
-denoising loop) is ~800–1200 lines of Lux.jl. DP-SGD adds ~300–500 lines
-for per-sample gradient clipping, noise injection, and a Rényi DP
-accountant.
+**Phase 3 detail — DiffusionGenerator:**  The core TabDDPM (cosine noise
+schedule, MLP denoiser with timestep and optional class conditioning,
+Gaussian + multinomial diffusion, denoising loop) is ~800–1200 lines of
+Lux.jl. DP-SGD adds ~300–500 lines for per-sample gradient clipping, noise
+injection, and a Rényi DP accountant.
+
+The engine follows the reference implementation
+([yandex-research/tab-ddpm](https://github.com/yandex-research/tab-ddpm))
+rather than paraphrasing the paper: a plain `Dense → ReLU → Dropout` MLP with
+no normalization or residual connections, categorical state carried in log
+space, the multinomial variational bound as the categorical objective, AdamW
+with linear LR annealing, and an EMA of the denoiser weights used for
+sampling.  Setting `target` enables the paper's `is_y_cond` mode.
 
 **Why Lux over Flux?**  Lux separates model structure from parameters
 (`model`, `ps`, `st`), making each forward pass a pure function of `ps`.
@@ -156,10 +164,15 @@ Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
     batch_size::Int    = 512
     hidden_dim::Int    = 0      # 0 = auto: min(256, max(64, 4·d_features))
     n_blocks::Int      = 4
-    embed_dim::Int     = 128
+    d_layers::Vector{Int} = Int[]   # explicit widths; overrides hidden_dim/n_blocks
+    num_timesteps::Int = 1000
+    embed_dim::Int     = 128    # dim_t in the reference implementation
     dropout::Float64   = 0.0
-    lr::Float64        = 1e-3   # peak learning rate
+    lr::Float64        = 1e-3
     lr_warmup::Int     = 0      # linear warmup epochs (0 = no warmup)
+    weight_decay::Float64 = 1e-4
+    ema_decay::Float64 = 0.999  # 0 = disable EMA
+    target::Union{Symbol, Nothing} = nothing   # class-conditional label column
 
     function DiffusionGenerator(dp, epochs, batch_size, hidden_dim, n_blocks,
                                 embed_dim, dropout, lr, lr_warmup)
@@ -225,7 +238,9 @@ struct FittedDPCopulaModel <: AbstractFittedModel
 end
 
 struct FittedDiffusionModel <: AbstractFittedModel
-    # ... trained Lux model, normalization params, etc.
+    # ... trained Lux model (EMA weights), quantile-transform references,
+    #     cosine β schedule, and — for class-conditional models — the target
+    #     column, its levels, and the empirical class distribution.
 end
 ```
 
@@ -236,9 +251,10 @@ end
 ### 3.1 CopulaGenerator (Phase 1)
 
 Port of the v1 engine with two improvements:
-- **Gaussian copula option** via Spearman rank correlation → Pearson
-  conversion, avoiding the need for complete-case filtering that `BetaCopula`
-  requires.
+- **Gaussian copula option** fitted through `Copulas.jl` on rank-based
+  pseudo-observations (maximum likelihood on normal scores by default).  Note
+  that both copula types currently filter to complete cases over the numeric
+  columns before fitting.
 - **Tables.jl input/output** instead of hard-coded `DataFrame`.
 
 | Property | Value |
@@ -287,8 +303,17 @@ Port of the v1 engine with two improvements:
 
 TabDDPM architecture [Kotelnikov et al. 2023]. Gaussian diffusion for
 numerical features [Ho et al. 2020], multinomial diffusion for categoricals
-[Hoogeboom et al. 2021]. DP-SGD training via [Abadi et al. 2016] with
-Rényi DP accounting [Mironov 2017]. Loaded only when `Lux.jl` is present.
+[Hoogeboom et al. 2021]. DP-SGD training via [Abadi et al. 2016] — Poisson-
+subsampled lots, per-sample clipping, Gaussian noise — with Rényi DP
+accounting for the sampled Gaussian mechanism [Mironov 2017], [Mironov et
+al. 2019], which reports a valid upper bound on the privacy spend. Loaded
+only when `Lux.jl` is present.
+
+**Preprocessing:** Continuous features are Gaussian-quantile-normalized
+(empirical CDF → Φ⁻¹) following TabDDPM §4.1, which handles heavy-tailed
+distributions far better than z-score normalization. The sorted training
+values are stored in `FittedDiffusionModel.num_references` for inverse
+transform during sampling.
 
 | Property | Value |
 |----------|-------|
@@ -598,7 +623,8 @@ DataMimic/
 | `Copulas.jl` | BetaCopula, GaussianCopula fitting |
 | `StatsBase.jl` | countmap, Weights, sampling |
 | `DataFrames.jl` | Direct dep — 95% of users will use it |
-| `EvoTrees.jl` | Random forests for TSTR evaluation (6 stdlib-level deps) |
+| `EvoTrees.jl` | Gradient-boosted trees for TSTR evaluation |
+| `SpecialFunctions.jl` | erf/erfinv for Gaussian quantile transform |
 | `Random` | RNG threading |
 | `Serialization` | Model save/load |
 | `LinearAlgebra` | Covariance, PSD projection (DP copula) |

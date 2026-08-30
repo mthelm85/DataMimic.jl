@@ -72,6 +72,25 @@ function _eval_column_kind(col::AbstractVector)
 end
 
 """
+Does this column carry too little variation to correlate against?
+
+True when fewer than two distinct finite values remain, in which case the
+column's ranks are constant and every Spearman correlation involving it is
+`0/0`.
+"""
+function _is_degenerate(col::AbstractVector)
+    seen = Set{Float64}()
+    for v in col
+        (ismissing(v) || !(v isa Number)) && continue
+        fv = Float64(v)
+        isfinite(fv) || continue
+        push!(seen, fv)
+        length(seen) ≥ 2 && return false
+    end
+    return true
+end
+
+"""
 Spearman correlation matrix for the given named numeric columns.
 Missing/non-finite values are replaced with column medians.
 """
@@ -115,8 +134,14 @@ Returns a `NamedTuple` with:
 - `column_metrics`: Dict mapping column name → metric name (`:ks` or `:tvd`)
 - `correlation_score`: Frobenius norm of Spearman correlation difference
 - `aggregate`: weighted mean of per-column mean and correlation score
+- `correlation_columns`: numeric columns actually used for the correlation
+- `correlation_excluded`: numeric columns dropped from the correlation because
+  they have fewer than two distinct finite values in `real` or in `synth`
 
 All scores are in [0, 1] where 0 is perfect fidelity.
+
+Columns with no variance are still scored individually — only the correlation
+term skips them, since a constant column has no ranks to correlate.
 """
 function fidelity_score(real, synth)
     Tables.istable(real)  || throw(ArgumentError("real must be a Tables.jl table"))
@@ -152,22 +177,35 @@ function fidelity_score(real, synth)
     end
 
     # ── 2D Spearman correlation ─────────────────────────────────────────
-    corr_score = if length(numeric_cols) ≥ 2
-        R_real  = _spearman_corr_matrix(r_cols, numeric_cols)
-        R_synth = _spearman_corr_matrix(s_cols, numeric_cols)
+    #
+    # A column with no variance has no rank spread, so its Spearman
+    # correlation against anything is 0/0 = NaN.  A single such column would
+    # otherwise poison the whole correlation matrix and, through it, the
+    # aggregate — turning the headline score into NaN even though every
+    # per-column score computed fine.  Constant columns are common in real
+    # tables, so they are excluded here and reported rather than propagated.
+    corr_cols = filter(numeric_cols) do name
+        !_is_degenerate(Tables.getcolumn(r_cols, name)) &&
+        !_is_degenerate(Tables.getcolumn(s_cols, name))
+    end
+    excluded = setdiff(numeric_cols, corr_cols)
+
+    corr_score = if length(corr_cols) ≥ 2
+        R_real  = _spearman_corr_matrix(r_cols, corr_cols)
+        R_synth = _spearman_corr_matrix(s_cols, corr_cols)
         # Normalize Frobenius by matrix size so score is in [0, 1] range
-        d = length(numeric_cols)
+        d = length(corr_cols)
         raw = LinearAlgebra.norm(R_real - R_synth)  # Frobenius norm
         clamp(raw / d, 0.0, 1.0)   # scale to ≈[0,1]
     else
-        0.0  # no correlation to compare
+        0.0  # fewer than two varying numeric columns — nothing to compare
     end
 
     # ── Aggregate ───────────────────────────────────────────────────────
     mean_1d = isempty(col_scores) ? 0.0 :
               sum(values(col_scores)) / length(col_scores)
     # Equal weight for 1D mean and 2D correlation
-    aggregate = if length(numeric_cols) ≥ 2
+    aggregate = if length(corr_cols) ≥ 2
         0.5 * mean_1d + 0.5 * corr_score
     else
         mean_1d
@@ -178,5 +216,7 @@ function fidelity_score(real, synth)
         column_metrics   = col_metrics,
         correlation_score = corr_score,
         aggregate        = aggregate,
+        correlation_columns = corr_cols,
+        correlation_excluded = excluded,
     )
 end
