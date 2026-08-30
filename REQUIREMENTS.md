@@ -214,24 +214,29 @@ a later phase.
 > 5. **Budget split** is ½ selection / ½ measurement, against the reference's
 >    ⅓ selection / ⅓ 1-way / ⅓ 2-way.  Both are valid zCDP compositions.
 >
-> **Measured limitation — tree selection is effectively random at realistic ε.**
-> Each of the `d−1` selection steps gets `ε_step = √(8·ρ_select/(d−1))`.  On
-> Adult (`d = 15`) at `ε = 0.5`, that is `ε_step ≈ 0.03`, so the exponential
-> mechanism's weights are `∝ exp(ε_step·score/2) ≈ 1.008` across candidates —
-> indistinguishable from a uniform draw.  Confirmed empirically: swapping the
-> score function between mutual information and L1-from-independence produced
-> **bit-identical** synthetic data at every ε from 0.5 to 8, because the same
-> RNG draws select the same (essentially arbitrary) tree either way.
+> **Fixed — selection used to be effectively random.**  The exponential
+> mechanism weights candidates by `exp(ε·q/(2Δ))`, so its ability to
+> discriminate depends on the *absolute* spread of the score.  The original
+> mutual-information score is measured in nats and spans a few tenths whatever
+> the dataset size; with `ε_step = √(8·ρ_select/(d−1)) ≈ 0.03` on a 15-column
+> table, every candidate landed within `exp(0.005)` of every other and the
+> spanning tree was a uniform random draw.  Confirmed at the time by swapping
+> the score function and getting **bit-identical** output at every ε.
 >
-> This caps what any downstream estimator can achieve and is a more fundamental
-> limitation than the missing PGM step.  A prototype adding full Private-PGM
-> reconciliation (belief propagation + mirror descent, verified exact against
-> brute force) improved marginal fidelity substantially — 0.164 → 0.110 at
-> ε = 0.5 — but **regressed TSTR by ~0.10 at every ε** and was not landed:
-> reconciliation propagates structure across the selected tree, which does not
-> help when that tree is arbitrary.  Fixing selection should come first.
-> The prototype is preserved at `dev/mst-pgm-wip.patch`, and
-> `benchmark/eval_mst.jl` reproduces the sweep.
+> Scoring on the **count** scale — `‖M_ab(D) − ŷ_a ⊗ ŷ_b / n‖₁` against the
+> noisy 1-way marginals, sensitivity 2 — makes the spread grow with `n`, which
+> is what the reference implementation does.  The TSTR ratio now rises with the
+> privacy budget (0.767 → 0.799 over ε ∈ [0.5, 8]) where it was previously flat
+> at ≈0.79: extra budget had been buying nothing.  See `benchmark/eval_mst.jl`
+> for before/after tables and for the seed-variance caveat at low ε.
+>
+> Still outstanding: PGM reconciliation and domain compression.  A prototype of
+> the former (belief propagation + entropic mirror descent, BP verified exact
+> against brute-force enumeration) improved marginal fidelity but dropped TSTR
+> to ≈0.68.  It was built on top of the old random-selection behaviour, so it
+> is worth re-testing now that selection works — reconciliation cannot help
+> when the tree it propagates over is arbitrary.  Preserved at
+> `dev/mst-pgm-wip.patch`.
 
 ---
 

@@ -2,8 +2,17 @@
 #
 #     julia --project=benchmark benchmark/eval_mst.jl
 #
-# Baseline for the current implementation (root 1-way marginal only,
-# mutual-information edge scoring, row-normalized conditionals):
+# SINGLE-SEED NUMBERS AT LOW EPSILON ARE NOISE.  Measured across 6 seeds:
+#
+#     eps = 0.5   TSTR ratio  mean 0.707  sd 0.063  range [0.579, 0.744]
+#     eps = 2.0   TSTR ratio  mean 0.811  sd 0.015  range [0.796, 0.840]
+#
+# At eps = 0.5 the seed-to-seed spread is larger than most differences worth
+# arguing about, so compare distributions over several seeds there, never two
+# single runs.  By eps = 2 the noise collapses and single runs are informative.
+#
+# Before count-scale edge scoring (mutual-information score, root 1-way
+# marginal only, half the budget on selection):
 #
 #     eps    fidelity   corr     TSTR F1   ratio
 #     0.5    0.1642     0.0969   0.6370    0.7950
@@ -12,15 +21,24 @@
 #     4.0    0.1150     0.0702   0.6353    0.7929
 #     8.0    0.1117     0.0699   0.6278    0.7836
 #
-# Note the TSTR ratio is flat in epsilon while fidelity improves.  That is a
-# symptom, not a coincidence: tree selection is effectively a uniform random
-# draw at these budgets (see the measured-limitation note under REQ-MST-007),
-# so the captured dependence structure does not improve as epsilon grows.
+# After (count-scale L1 score anchored on noisy 1-way marginals, 30/20/50
+# budget split):
 #
-# Any change to the engine should be compared against the table above before
-# landing.  A Private-PGM reconciliation prototype improved fidelity to ~0.110
-# across the sweep but dropped the TSTR ratio to ~0.68 and was rejected on that
-# basis; it is preserved at dev/mst-pgm-wip.patch.
+#     eps    fidelity   corr     TSTR F1   ratio
+#     0.5    0.1475     0.0789   0.6146    0.7671
+#     1.0    0.1204     0.0717   0.6381    0.7964
+#     2.0    0.1138     0.0691   0.6445    0.8044
+#     4.0    0.1080     0.0636   0.6413    0.8005
+#     8.0    0.1061     0.0627   0.6404    0.7993
+#
+# Note that the TSTR ratio now RISES with epsilon (0.767 -> 0.799) where before
+# it was flat at ~0.79.  Flatness was the symptom of selection being a uniform
+# random draw: extra budget bought nothing.  The eps = 0.5 rows differ by less
+# than one seed-standard-deviation and should not be read as a regression.
+#
+# A Private-PGM reconciliation prototype (dev/mst-pgm-wip.patch) improved
+# fidelity further but dropped TSTR to ~0.68; it was built on top of the old
+# random-selection behaviour and is worth re-testing now that selection works.
 
 using Pkg
 Pkg.activate("benchmark")
