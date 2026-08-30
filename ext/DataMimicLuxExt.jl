@@ -6,8 +6,9 @@
 # Implements REQ-DIF-001 through REQ-DIF-009.
 #
 # References:
-#   [Kotelnikov et al. 2023]   — TabDDPM architecture (ResNet MLP + additive
-#                                 timestep conditioning + LayerNorm + SiLU)
+#   [Kotelnikov et al. 2023]   — TabDDPM architecture (plain rtdl MLP with
+#                                 additive timestep + label conditioning;
+#                                 no normalization, no residual connections)
 #   [Ho et al. 2020]           — DDPM (Gaussian diffusion)
 #   [Song et al. 2020]         — DDIM (deterministic reverse sampling)
 #   [Hoogeboom et al. 2021]    — Multinomial diffusion
@@ -31,6 +32,7 @@ using Random: AbstractRNG
 import Random
 import Tables
 import LinearAlgebra
+import SpecialFunctions
 
 # Custom relu that bypasses cuDNN (avoids CUDNN_STATUS_SUBLIBRARY_LOADING_FAILED
 # when cuDNN is missing or version-mismatched).  Pure CUDA element-wise kernel.
@@ -41,39 +43,106 @@ _fast_relu(x) = max(x, zero(x))
 _fast_silu(x) = x / (1f0 + exp(-x))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 1. Data Preprocessing
+# 1. Data Preprocessing — Gaussian Quantile Transform
 # ═══════════════════════════════════════════════════════════════════════════
+#
+# Following [Kotelnikov et al. 2023, TabDDPM] §4.1: continuous features are
+# transformed via the Gaussian quantile method — each feature is mapped to
+# approximate N(0,1) through its empirical CDF → Φ⁻¹.  This handles
+# heavy-tailed distributions (e.g. capital-gain in Adult) far better than
+# z-score normalization.
+
+"""
+    _quantile_forward(v, reference, n_ref) → Float32
+
+Map a single value `v` to its Gaussian-quantile-transformed score using
+sorted `reference` training values.  Returns Φ⁻¹(rank / (n+1)).
+"""
+function _quantile_forward(v::Float32, reference::Vector{Float32}, n_ref::Int)
+    # Find position via binary search; average rank for ties
+    lo = searchsortedfirst(reference, v)
+    hi = searchsortedlast(reference, v)
+    avg_rank = (lo + hi) / 2.0
+    # Plotting position: (rank - 0.5) / n  ∈ (0, 1)
+    q = clamp((avg_rank - 0.5) / n_ref, 1e-7, 1.0 - 1e-7)
+    # Inverse normal CDF: Φ⁻¹(q) = √2 · erfinv(2q − 1)
+    return Float32(sqrt(2.0) * SpecialFunctions.erfinv(2.0 * q - 1.0))
+end
+
+"""
+    _quantile_inverse(z, reference) → Float32
+
+Inverse Gaussian quantile transform: map a standard-normal value `z` back
+to the original feature scale via Φ(z) → interpolation in sorted reference.
+"""
+function _quantile_inverse(z::Float32, reference::Vector{Float32})
+    n = length(reference)
+    # Normal CDF: Φ(z) = 0.5 · (1 + erf(z / √2))
+    q = 0.5 * (1.0 + SpecialFunctions.erf(Float64(z) / sqrt(2.0)))
+    q = clamp(q, 0.5 / n, 1.0 - 0.5 / n)
+    # Map quantile to 1-indexed position in reference
+    pos = q * n + 0.5
+    lo = clamp(floor(Int, pos), 1, n)
+    hi = clamp(lo + 1, 1, n)
+    frac = Float32(pos - lo)
+    return reference[lo] * (1f0 - frac) + reference[hi] * frac
+end
 
 """
 Pack table columns into Float32 arrays for training.
 
 Returns `(X_num, X_cat_onehot, cat_indices, preprocess_info)`.
-- `X_num`: `(d_num, N)` Float32 matrix, z-score normalized.
+- `X_num`: `(d_num, N)` Float32 matrix, Gaussian-quantile normalized.
 - `X_cat_onehot`: `(sum(cat_dims), N)` Float32 matrix.
 - `cat_indices`: `(n_cat, N)` Int matrix — original category index per row.
+
+When `target` names a column, it is held out of the categorical features and
+returned separately as class labels for conditional generation.
 """
-function _preprocess(cols, col_names, col_kinds, id_set, hints, nrows)
+function _preprocess(cols, col_names, col_kinds, id_set, hints, nrows;
+                     target::Union{Symbol, Nothing} = nothing)
     hint_dict = Dict(h.name => h for h in hints)
 
-    num_cols   = Symbol[]
-    cat_cols   = Symbol[]
-    num_means  = Float32[]
-    num_stds   = Float32[]
-    cat_levels = Dict{Symbol, Vector}()
-    cat_dims   = Int[]
+    num_cols       = Symbol[]
+    cat_cols       = Symbol[]
+    num_references = Vector{Float32}[]   # sorted training values per column
+    num_round      = Bool[]              # round to integers on inverse transform
+    cat_levels     = Dict{Symbol, Vector}()
+    cat_dims       = Int[]
+
+    # Class labels for conditional generation
+    target_levels = Any[]
+    y_indices     = Int[]
 
     for (i, name) in enumerate(col_names)
         kind = col_kinds[i]
         kind == :identifier && continue
 
+        if name === target
+            col = Tables.getcolumn(cols, name)
+            nm  = DataMimic._nonmissing(collect(col))
+            n_missing = nrows - length(nm)
+            if n_missing > 0
+                throw(ArgumentError(
+                    "target column :$name has $n_missing missing value(s). " *
+                    "Class-conditional generation needs a label for every row — " *
+                    "drop those rows, impute them, or encode missing as an " *
+                    "explicit level before fitting."))
+            end
+            target_levels = sort(unique(nm))
+            lvl_map = Dict(v => k for (k, v) in enumerate(target_levels))
+            y_indices = [lvl_map[col[r]] for r in 1:nrows]
+            continue
+        end
+
         if kind in (:continuous, :integer)
             push!(num_cols, name)
             nm = Float32.(DataMimic._nonmissing(collect(Tables.getcolumn(cols, name))))
-            μ  = length(nm) > 0 ? sum(nm) / length(nm) : 0f0
-            σ  = length(nm) > 1 ? sqrt(sum((nm .- μ).^2) / (length(nm) - 1)) : 1f0
-            σ  = max(σ, 1f-7)
-            push!(num_means, μ)
-            push!(num_stds, σ)
+            push!(num_references, sort(nm))
+            # The reference implementation rounds a numeric column back to
+            # integers when the training values are integral and few-valued.
+            uniq = unique(nm)
+            push!(num_round, length(uniq) <= 32 && all(v -> v == round(v), uniq))
         elseif kind in (:categorical, :binary)
             push!(cat_cols, name)
             hint = get(hint_dict, name, nothing)
@@ -92,14 +161,19 @@ function _preprocess(cols, col_names, col_kinds, id_set, hints, nrows)
     d_num = length(num_cols)
     d_cat_total = sum(cat_dims; init = 0)
 
-    # ── Build numeric matrix ────────────────────────────────────────────
+    # ── Build numeric matrix (Gaussian quantile transform) ──────────────
     X_num = zeros(Float32, d_num, nrows)
     for (j, name) in enumerate(num_cols)
         col = Tables.getcolumn(cols, name)
-        μ, σ = num_means[j], num_stds[j]
+        ref = num_references[j]
+        n_ref = length(ref)
         for i in 1:nrows
             v = col[i]
-            X_num[j, i] = ismissing(v) ? 0f0 : (Float32(v) - μ) / σ
+            if ismissing(v)
+                X_num[j, i] = 0f0   # missing → median of N(0,1)
+            else
+                X_num[j, i] = _quantile_forward(Float32(v), ref, n_ref)
+            end
         end
     end
 
@@ -121,8 +195,20 @@ function _preprocess(cols, col_names, col_kinds, id_set, hints, nrows)
         offset += K
     end
 
-    info = (; num_cols, cat_cols, num_means, num_stds,
-              cat_levels, cat_dims, d_num, d_cat_total)
+    # Empirical class distribution for conditional sampling
+    class_dist = if isempty(target_levels)
+        Float64[]
+    else
+        counts = zeros(Float64, length(target_levels))
+        for k in y_indices
+            counts[k] += 1
+        end
+        counts ./ sum(counts)
+    end
+
+    info = (; num_cols, cat_cols, num_references, num_round,
+              cat_levels, cat_dims, d_num, d_cat_total,
+              target_levels, y_indices, class_dist)
     return X_num, X_cat_oh, cat_indices, info
 end
 
@@ -130,12 +216,232 @@ end
 # 2. Noise Schedule
 # ═══════════════════════════════════════════════════════════════════════════
 
-"""Linear β schedule [Ho et al. 2020]: β_1 = 1e-4, β_T = 0.02."""
-function _linear_schedule(T::Int)
-    betas = Float32.(range(1f-4, 0.02f0; length = T))
+"""
+Cosine β schedule [Nichol & Dhariwal 2021], the TabDDPM default.
+
+    ᾱ(t) = cos²((t + 0.008) / 1.008 · π/2),  β_i = min(1 - ᾱ(t₂)/ᾱ(t₁), 0.999)
+"""
+function _cosine_schedule(T::Int)
+    ᾱ(t) = cos((t + 0.008) / 1.008 * π / 2)^2
+    betas = Float32[min(1 - ᾱ((i + 1) / T) / ᾱ(i / T), 0.999) for i in 0:(T - 1)]
     alphas = 1f0 .- betas
     alphas_cumprod = cumprod(alphas)
     return betas, alphas_cumprod
+end
+
+# ── Log-domain helpers for multinomial diffusion ──────────────────────────
+
+"""
+Numerically stable `log(exp(a) + exp(b))`.
+
+Guards the `a == b == -Inf` case, where `a - max(a, b)` would be `NaN`.
+"""
+function _log_add_exp(a, b)
+    m = max(a, b)
+    isfinite(m) || return m
+    return m + log(exp(a - m) + exp(b - m))
+end
+
+"""
+`log(1 - exp(a))` for `a ≤ 0`, evaluated without catastrophic cancellation.
+
+The schedule's cumulative α values sit very close to 1 at small `t`, so `a` is
+very close to 0 and the naive `log(1 - exp(a))` loses most of its significant
+digits.  Two branches keep the relative error small across the range
+[Mächler 2012, "Accurately Computing log(1 - exp(-|a|))"].
+"""
+function _log_1_min_a(a)
+    a >= 0 && return oftype(float(a), -Inf)
+    return a > -log(oftype(float(a), 2)) ? log(-expm1(a)) : log1p(-exp(a))
+end
+
+"""
+Derive every schedule constant the Gaussian and multinomial processes need.
+
+Returns a NamedTuple with the Gaussian posterior coefficients and the
+log-domain α terms used by multinomial diffusion [Hoogeboom et al. 2021].
+"""
+function _schedule_constants(betas_f32::Vector{Float32})
+    # Derived in Float64 and narrowed at the end, as the reference does.  The
+    # cumulative products run very close to 1 at small t and to 0 at large t,
+    # so accumulating them in Float32 would lose most of the precision.
+    T = length(betas_f32)
+    betas  = Float64.(betas_f32)
+    alphas = 1.0 .- betas
+    alphas_cumprod = cumprod(alphas)
+    alphas_cumprod_prev = vcat(1.0, alphas_cumprod[1:(end - 1)])
+
+    # Gaussian posterior q(x_{t-1} | x_t, x_0)
+    posterior_variance = betas .* (1.0 .- alphas_cumprod_prev) ./ (1.0 .- alphas_cumprod)
+    posterior_log_variance_clipped = log.(vcat(posterior_variance[2], posterior_variance[2:end]))
+    posterior_mean_coef1 = betas .* sqrt.(alphas_cumprod_prev) ./ (1.0 .- alphas_cumprod)
+    posterior_mean_coef2 = (1.0 .- alphas_cumprod_prev) .* sqrt.(alphas) ./ (1.0 .- alphas_cumprod)
+
+    # Multinomial (log domain)
+    log_alpha = log.(alphas)
+    log_cumprod_alpha = cumsum(log_alpha)
+    log_1_min_alpha = _log_1_min_a.(log_alpha)
+    log_1_min_cumprod_alpha = _log_1_min_a.(log_cumprod_alpha)
+
+    f32(x) = Float32.(x)
+    return (; betas = betas_f32,
+              alphas = f32(alphas),
+              alphas_cumprod = f32(alphas_cumprod),
+              alphas_cumprod_prev = f32(alphas_cumprod_prev),
+              posterior_variance = f32(posterior_variance),
+              posterior_log_variance_clipped = f32(posterior_log_variance_clipped),
+              posterior_mean_coef1 = f32(posterior_mean_coef1),
+              posterior_mean_coef2 = f32(posterior_mean_coef2),
+              log_alpha = f32(log_alpha),
+              log_cumprod_alpha = f32(log_cumprod_alpha),
+              log_1_min_alpha = f32(log_1_min_alpha),
+              log_1_min_cumprod_alpha = f32(log_1_min_cumprod_alpha), T)
+end
+
+"""
+Row offsets delimiting each categorical block in a stacked one-hot matrix.
+`cat_dims = [2, 3]` → `[0, 2, 5]`.
+"""
+_cat_offsets(cat_dims::Vector{Int}) = cumsum(vcat(0, cat_dims))
+
+# ── Ragged categorical blocks as one padded tensor ────────────────────────
+#
+# Categorical features have different cardinalities, so the natural way to
+# normalize them is a loop over blocks.  That is fatal here: the block ops sit
+# inside the differentiated loss, so Zygote generates a separate pullback per
+# block, three times over (`_predict_start`, and `_q_posterior` both directly
+# and via `_p_pred`).  On a table with nine categorical columns that is ~27
+# block-pullbacks inlined into one function, and compilation blows up
+# superlinearly — minutes to compile a single gradient.
+#
+# Padding the blocks into a rectangular (K_max, n_cat, batch) tensor turns
+# every per-block reduction into one reduction along dimension 1.  The op count
+# is then constant in the number of categorical columns.  Padding uses a large
+# negative sentinel rather than -Inf so that `exp` underflows cleanly to zero
+# without risking NaN in the pullback.
+
+const _PAD_SENTINEL = -1f30
+
+"""
+Precompute the block-structure operators for a set of categorical dimensions.
+
+- `B` / `Bt`: `(n_cat, d_cat)` membership matrix and its transpose.  Summing
+  within each block is linear, so `Bt * (B * e)` computes every block sum and
+  broadcasts it back over the block's rows in two cuBLAS matmuls — far faster
+  than index-based gathers, and its adjoint is another matmul.
+- `P` / `U`: pad/unpad operators to the `(K_max, n_cat, batch)` layout, needed
+  only for the per-block argmax in sampling (max is not linear, so it cannot
+  be expressed as a matmul).
+"""
+function _block_plan(cat_dims::Vector{Int}, dev)
+    n_cat = length(cat_dims)
+    n_cat == 0 && return nothing
+    K_max = maximum(cat_dims)
+    d_cat = sum(cat_dims)
+    offs  = _cat_offsets(cat_dims)
+    pad_row = d_cat + 1                      # sentinel row appended to x
+
+    B = zeros(Float32, n_cat, d_cat)
+    for c in 1:n_cat, k in 1:cat_dims[c]
+        B[c, offs[c] + k] = 1f0
+    end
+
+    P = zeros(Float32, K_max * n_cat, d_cat + 1)
+    for c in 1:n_cat, k in 1:K_max
+        P[(c - 1) * K_max + k, k <= cat_dims[c] ? offs[c] + k : pad_row] = 1f0
+    end
+    U = zeros(Float32, d_cat, K_max * n_cat)
+    for c in 1:n_cat, k in 1:cat_dims[c]
+        U[offs[c] + k, (c - 1) * K_max + k] = 1f0
+    end
+
+    return (; n_cat, K_max, d_cat,
+              B  = _to_device(B, dev),
+              Bt = _to_device(collect(B'), dev),
+              P  = _to_device(P, dev),
+              U  = _to_device(U, dev))
+end
+
+"""Pad the packed categorical rows into the `(K_max, n_cat, batch)` layout."""
+function _to_padded(x, plan)
+    pad = @view(x[1:1, :]) .* 0f0 .+ _PAD_SENTINEL
+    return reshape(plan.P * vcat(x, pad), plan.K_max, plan.n_cat, :)
+end
+
+"""Unpad back to the packed `(Σ K, batch)` layout."""
+_from_padded(padded, plan) =
+    plan.U * reshape(padded, plan.K_max * plan.n_cat, :)
+
+"""
+Normalize each categorical block to log-probabilities (per-block log-softmax).
+
+Equivalent to `x - sliced_logsumexp(x)` in the reference implementation.
+
+The per-block sum is computed as two matmuls against the block-membership
+matrix, which keeps this to a handful of cuBLAS/elementwise kernels.  A single
+global maximum is enough to stabilize `exp`: these are log-probabilities, so
+the shifted values stay well inside Float32 range.
+"""
+function _block_log_normalize(x, plan)
+    z = x .- maximum(x)
+    s = plan.Bt * (plan.B * exp.(z))     # block sums, broadcast back over rows
+    return z .- log.(s)
+end
+
+"""KL divergence between two per-feature categorical log-probability matrices."""
+_multinomial_kl(log_p, log_q) = sum(exp.(log_p) .* (log_p .- log_q); dims = 1)
+
+"""log q(x_t | x_0) — the `q_pred` of the reference implementation."""
+function _q_pred(log_x_start, log_cumprod_alpha_t, log_1_min_cumprod_alpha_t, log_K)
+    return _log_add_exp.(log_x_start .+ log_cumprod_alpha_t,
+                         log_1_min_cumprod_alpha_t .- log_K)
+end
+
+"""log q(x_t | x_{t-1}) — one-step forward, `q_pred_one_timestep`."""
+function _q_pred_one_step(log_x_t, log_alpha_t, log_1_min_alpha_t, log_K)
+    return _log_add_exp.(log_x_t .+ log_alpha_t,
+                         log_1_min_alpha_t .- log_K)
+end
+
+# ── Per-batch schedule coefficients ───────────────────────────────────────
+#
+# The multinomial process needs four schedule values per row, plus a mask for
+# the `t == 1` boundary.  Indexing the schedule on the host and copying the
+# slices across for every loss call costs one synchronization per transfer and
+# dominates the step time, so the schedule is kept device-resident and gathered
+# with a device-side index vector.  Sampling uses a single scalar timestep, so
+# its coefficients are plain scalars that broadcast for free.
+
+"""Move the schedule arrays the multinomial branch indexes onto `dev`."""
+function _device_schedule(sched, dev)
+    return (; log_alpha               = _to_device(sched.log_alpha, dev),
+              log_1_min_alpha         = _to_device(sched.log_1_min_alpha, dev),
+              log_cumprod_alpha       = _to_device(sched.log_cumprod_alpha, dev),
+              log_1_min_cumprod_alpha = _to_device(sched.log_1_min_cumprod_alpha, dev))
+end
+
+"""Gather the per-row schedule coefficients for a training batch (on device)."""
+function _batch_coefs(sched_d, t_d)
+    t_prev = max.(t_d .- 1, 1)
+    return (; lca_prev = reshape(sched_d.log_cumprod_alpha[t_prev], 1, :),
+              l1m_prev = reshape(sched_d.log_1_min_cumprod_alpha[t_prev], 1, :),
+              lca      = reshape(sched_d.log_cumprod_alpha[t_d], 1, :),
+              l1m      = reshape(sched_d.log_1_min_cumprod_alpha[t_d], 1, :),
+              la       = reshape(sched_d.log_alpha[t_d], 1, :),
+              l1a      = reshape(sched_d.log_1_min_alpha[t_d], 1, :),
+              is_first = reshape(Float32.(t_d .== 1), 1, :))
+end
+
+"""Schedule coefficients for a single scalar timestep (sampling)."""
+function _scalar_coefs(sched, t::Int)
+    tp = max(t - 1, 1)
+    return (; lca_prev = sched.log_cumprod_alpha[tp],
+              l1m_prev = sched.log_1_min_cumprod_alpha[tp],
+              lca      = sched.log_cumprod_alpha[t],
+              l1m      = sched.log_1_min_cumprod_alpha[t],
+              la       = sched.log_alpha[t],
+              l1a      = sched.log_1_min_alpha[t],
+              is_first = t == 1 ? 1f0 : 0f0)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -167,7 +473,8 @@ function (layer::SinusoidalEmbedding)(t, ps, st)
     t_flat = vec(t)                 # (batch,) on device
     freqs  = st.freqs               # (half,) on device
     args   = t_flat' .* freqs       # (half, batch)
-    emb    = vcat(sin.(args), cos.(args))  # (dim, batch)
+    # cos before sin, matching `timestep_embedding` in the reference code
+    emb    = vcat(cos.(args), sin.(args))  # (dim, batch)
     return emb, st
 end
 
@@ -177,105 +484,104 @@ Lux.statelength(l::SinusoidalEmbedding) = l.dim ÷ 2
 # 4. TabDDPM Backbone  [Kotelnikov et al. 2023]
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# Architecture (following the TabDDPM ResNet MLP):
-#   1. Sinusoidal timestep embedding → 2-layer MLP with SiLU
-#   2. Input features → Dense projection → + time embedding
-#   3. ResNet blocks: [LayerNorm → SiLU → Dense → SiLU → (Dropout) → Dense]
-#      with residual skip connections
-#   4. Output head:  LayerNorm → SiLU → Dense → d_out
+# Mirrors `MLPDiffusion` in the reference implementation:
+#   emb = time_embed(timestep_embedding(t, dim_t))
+#   emb += silu(label_emb(y))            # only when class-conditional
+#   x   = proj(x) + emb
+#   out = mlp(x)
+#
+# `mlp` is the rtdl baseline MLP [Gorishniy et al. 2021]: a stack of
+# `Dense → ReLU → Dropout` blocks followed by a linear head.  There is no
+# normalization and there are no residual connections.
 
 """
-Lux container layer for the TabDDPM denoising network.
+Lux container layer for the TabDDPM denoising network [Kotelnikov et al. 2023].
 
 Subcomponents:
-- `proj`:     Dense(d_in → hidden)  — input feature projection
-- `time_mlp`: Chain(Dense → SiLU → Dense) — timestep embedding projection
-- `blocks`:   Chain of SkipConnection ResNet blocks with LayerNorm + SiLU
-- `out_head`: Chain(LayerNorm → SiLU → Dense) — output projection
+- `proj`:       Dense(d_in → dim_t) — input feature projection
+- `time_embed`: Chain(Dense → SiLU → Dense) — timestep embedding projection
+- `label_emb`:  Embedding(n_classes → dim_t), or `NoOpLayer` when unconditional
+- `mlp`:        Chain of Dense(ReLU) + Dropout blocks, then a linear head
 
-Call signature: `(model)((features, t_emb), ps, st)` where
-- `features`: (d_in, batch) — concatenated numeric + categorical features
-- `t_emb`:    (embed_dim, batch) — raw sinusoidal timestep embedding
+Call signature: `(model)((features, t_emb, y), ps, st)` where
+- `features`: (d_in, batch) — numeric ⧺ log-one-hot categorical features
+- `t_emb`:    (dim_t, batch) — raw sinusoidal timestep embedding
+- `y`:        (batch,) integer class indices, or `nothing` when unconditional
 """
-struct TabDDPMBackbone <: Lux.AbstractLuxContainerLayer{(:proj, :time_mlp, :blocks, :out_head)}
+struct TabDDPMBackbone <: Lux.AbstractLuxContainerLayer{(:proj, :time_embed, :label_emb, :mlp)}
     proj
-    time_mlp
-    blocks
-    out_head
+    time_embed
+    label_emb
+    mlp
 end
 
-function (m::TabDDPMBackbone)((features, t_emb), ps, st)
-    # Project input features: (d_in, B) → (hidden, B)
+function (m::TabDDPMBackbone)((features, t_emb, y), ps, st)
+    # Timestep conditioning: (dim_t, B) → (dim_t, B)
+    emb, st_time = Lux.apply(m.time_embed, t_emb, ps.time_embed, st.time_embed)
+
+    # Class conditioning: emb += silu(label_emb(y))
+    st_label = st.label_emb
+    if y !== nothing && !(m.label_emb isa Lux.NoOpLayer)
+        lab, st_label = Lux.apply(m.label_emb, y, ps.label_emb, st.label_emb)
+        emb = emb .+ _fast_silu.(lab)
+    end
+
+    # Project features and add the conditioning vector
     h, st_proj = Lux.apply(m.proj, features, ps.proj, st.proj)
+    h = h .+ emb
 
-    # Project timestep embedding: (embed_dim, B) → (hidden, B), then add
-    t_proj, st_tmlp = Lux.apply(m.time_mlp, t_emb, ps.time_mlp, st.time_mlp)
-    h = h .+ t_proj
+    output, st_mlp = Lux.apply(m.mlp, h, ps.mlp, st.mlp)
 
-    # ResNet blocks (residual connections handled by SkipConnection)
-    h, st_blocks = Lux.apply(m.blocks, h, ps.blocks, st.blocks)
-
-    # Output head
-    output, st_head = Lux.apply(m.out_head, h, ps.out_head, st.out_head)
-
-    st_new = (; proj = st_proj, time_mlp = st_tmlp,
-                blocks = st_blocks, out_head = st_head)
+    st_new = (; proj = st_proj, time_embed = st_time,
+                label_emb = st_label, mlp = st_mlp)
     return output, st_new
 end
 
 """
-Build the TabDDPM denoising network.
+Build the TabDDPM denoising network [Kotelnikov et al. 2023].
 
-Architecture: proj(features) + time_mlp(t_emb) → ResNet blocks → output.
+    proj(features) + time_embed(t_emb) [+ silu(label_emb(y))] → MLP → output
 
-- `d_in`:     feature dimension (d_num + d_cat_onehot) — no timestep embedding
-- `d_num`:    number of numeric output channels (predict noise ε)
-- `cat_dims`: per-categorical output logits
-- `hidden`:   hidden dimension
-- `n_blocks`: number of residual blocks
-- `embed_dim`:timestep embedding dimension
+- `d_in`:      feature dimension (d_num + Σ cat_dims)
+- `d_num`:     number of numeric output channels (predicts noise ε)
+- `cat_dims`:  per-categorical output logits
+- `d_layers`:  per-layer widths of the MLP (the paper's `rtdl_params.d_layers`)
+- `embed_dim`: timestep embedding width (`dim_t`)
+- `n_classes`: number of label classes; 0 = unconditional
 """
 function _build_model(d_in::Int, d_num::Int, cat_dims::Vector{Int};
-                      hidden::Int = 256, n_blocks::Int = 4,
-                      embed_dim::Int = 128, dropout::Float64 = 0.0)
+                      d_layers::Vector{Int} = [256, 256],
+                      embed_dim::Int = 128, dropout::Float64 = 0.0,
+                      n_classes::Int = 0)
     d_out = d_num + sum(cat_dims; init = 0)
 
-    # Input projection (no activation — first block has pre-activation norm)
-    proj = Dense(d_in => hidden)
+    proj = Dense(d_in => embed_dim)
 
-    # Time embedding MLP: embed_dim → hidden with SiLU
-    time_mlp = Chain(
-        Dense(embed_dim => hidden, _fast_silu),
-        Dense(hidden => hidden))
+    # time_embed: Linear(dim_t, dim_t) → SiLU → Linear(dim_t, dim_t)
+    time_embed = Chain(
+        Dense(embed_dim => embed_dim, _fast_silu),
+        Dense(embed_dim => embed_dim))
 
-    # Residual blocks: pre-activation ResNet [LayerNorm → SiLU → Dense → SiLU → Dense]
-    block_layers = []
-    for _ in 1:n_blocks
-        inner = if dropout > 0
-            Chain(
-                Lux.LayerNorm((hidden,)),
-                Lux.WrappedFunction(x -> _fast_silu.(x)),
-                Dense(hidden => hidden, _fast_silu),
-                Lux.Dropout(Float32(dropout)),
-                Dense(hidden => hidden))
-        else
-            Chain(
-                Lux.LayerNorm((hidden,)),
-                Lux.WrappedFunction(x -> _fast_silu.(x)),
-                Dense(hidden => hidden, _fast_silu),
-                Dense(hidden => hidden))
-        end
-        push!(block_layers, SkipConnection(inner, +))
+    label_emb = n_classes > 0 ? Lux.Embedding(n_classes => embed_dim) : Lux.NoOpLayer()
+
+    # rtdl baseline MLP: [Dense(ReLU) → Dropout] per layer, then a linear head.
+    #
+    # Zygote's compile time is superlinear in `Chain` length (measured: a
+    # 2-layer stack compiles in 0.8s, a 4-layer stack in 17.6s), so the
+    # zero-probability Dropout layers are omitted rather than included as
+    # no-ops — they would double the chain length for no numerical effect.
+    p = Float32(max(dropout, 0.0))
+    layers = Any[]
+    d_prev = embed_dim
+    for d in d_layers
+        push!(layers, Dense(d_prev => d, _fast_relu))
+        p > 0 && push!(layers, Lux.Dropout(p))
+        d_prev = d
     end
-    blocks = Chain(block_layers...)
+    push!(layers, Dense(d_prev => d_out))
+    mlp = Chain(layers...)
 
-    # Output head: LayerNorm → SiLU → Dense
-    out_head = Chain(
-        Lux.LayerNorm((hidden,)),
-        Lux.WrappedFunction(x -> _fast_silu.(x)),
-        Dense(hidden => d_out))
-
-    model = TabDDPMBackbone(proj, time_mlp, blocks, out_head)
+    model = TabDDPMBackbone(proj, time_embed, label_emb, mlp)
     return model, embed_dim
 end
 
@@ -300,28 +606,78 @@ function _gaussian_forward(x0, alphas_cumprod, t, rng, dev)
     return x_t, ε
 end
 
+# ── Multinomial diffusion in log space [Hoogeboom et al. 2021] ────────────
+#
+# The reference implementation carries categorical state as *log* one-hot
+# vectors throughout: the network input, the forward process, and the reverse
+# posterior all operate on log-probabilities.
+
+"""Row vector of `log K` repeated across each categorical block."""
+function _log_K_vector(cat_dims::Vector{Int})
+    return vcat([fill(Float32(log(K)), K) for K in cat_dims]...)
+end
+
+"""Convert a stacked one-hot matrix to log space (`index_to_log_onehot`)."""
+_to_log_onehot(x_oh) = log.(max.(x_oh, 1f-30))
+
 """
-Multinomial forward diffusion: corrupt categorical one-hot at timestep t.
+Draw categories via the Gumbel-max trick, returning a log-one-hot matrix.
 
-    q(x_t | x_0) = Cat(ᾱ_t · x_0 + (1 - ᾱ_t) / K)
-
-Returns softened one-hot vectors (not re-sampled — used directly as input).
+Mirrors `log_sample_categorical`: independent Gumbel noise per category,
+argmax within each categorical block.
 """
-function _multinomial_forward(x0_oh, cat_dims, alphas_cumprod, t, dev)
-    batch = size(x0_oh, 2)
-    # Index alphas_cumprod on CPU to avoid GPU scalar indexing
-    abar_cpu = Float32.(alphas_cumprod[t])'      # (1, batch) on CPU
-    abar     = _to_device(abar_cpu, dev)
+function _log_sample_categorical(logits, plan, rng, dev)
+    u = _to_device(rand(rng, Float32, size(logits)...), dev)
+    gumbel = -log.(-log.(u .+ 1f-30) .+ 1f-30)
+    noisy  = gumbel .+ logits
 
-    x_t = similar(x0_oh)
-    offset = 0
-    for K in cat_dims
-        block = @view x0_oh[(offset + 1):(offset + K), :]
-        uniform = 1f0 / K
-        x_t[(offset + 1):(offset + K), :] = abar .* block .+ (1f0 .- abar) .* uniform
-        offset += K
-    end
-    return x_t
+    # Per-block argmax as a one-hot mask, computed on-device in one reduction
+    # (ties have probability zero under continuous Gumbel noise, and the
+    # padding sentinel can never be the block maximum).
+    padded = _to_padded(noisy, plan)
+    mask = Float32.(padded .== maximum(padded; dims = 1))
+    return _to_log_onehot(_from_padded(mask, plan))
+end
+
+"""
+Multinomial forward diffusion: `q(x_t | x_0)` followed by a categorical draw.
+
+Returns the log-one-hot state at timestep `t`.
+"""
+function _multinomial_q_sample(log_x_start, plan, coef, log_K, rng, dev)
+    log_probs = _q_pred(log_x_start, coef.lca, coef.l1m, log_K)
+    return _log_sample_categorical(log_probs, plan, rng, dev)
+end
+
+"""
+Per-categorical-block log-softmax of the network output (`predict_start`).
+
+The multinomial branch uses the `x0` parametrization: the network predicts
+log-probabilities of the *clean* categories.
+"""
+_predict_start(model_out_cat, plan) = _block_log_normalize(model_out_cat, plan)
+
+"""
+Log of the true reverse posterior `q(x_{t-1} | x_t, x_0)` (`q_posterior`).
+
+`t_idx` is the 1-based timestep vector; `t_prev` is `max(t-1, 1)` with the
+`t == 1` entries replaced by `log_x_start`, matching the reference guard.
+"""
+function _q_posterior(log_x_start, log_x_t, plan, coef, log_K)
+    log_EV = _q_pred(log_x_start, coef.lca_prev, coef.l1m_prev, log_K)
+
+    # At t == 1 the posterior is exactly x_0
+    log_EV = coef.is_first .* log_x_start .+ (1f0 .- coef.is_first) .* log_EV
+
+    unnormed = log_EV .+ _q_pred_one_step(log_x_t, coef.la, coef.l1a, log_K)
+
+    return _block_log_normalize(unnormed, plan)
+end
+
+"""Reverse model distribution `p(x_{t-1} | x_t)` (`p_pred`, x0 parametrization)."""
+function _p_pred(model_out_cat, log_x_t, plan, coef, log_K)
+    log_x_recon = _predict_start(model_out_cat, plan)
+    return _q_posterior(log_x_recon, log_x_t, plan, coef, log_K)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -329,59 +685,72 @@ end
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-Combined loss: MSE on Gaussian noise prediction + cross-entropy on
-multinomial logits.
+Prior KL term of the multinomial variational bound (`kl_prior`).
 
-`x_cat_original` is the un-noised one-hot encoding of the true
-categorical labels (same layout as `X_cat_noised`).  Using it avoids
-scalar indexing into GPU arrays.
+Compares `q(x_T | x_0)` against the uniform categorical prior.  Independent of
+the network output, but part of the reported loss in the reference code.
+"""
+function _kl_prior(log_x_start, log_K, lca_T::Float32, l1m_T::Float32)
+    log_qxT = _q_pred(log_x_start, lca_T, l1m_T, log_K)
+    return _multinomial_kl(log_qxT, -log_K)
+end
+
+"""
+TabDDPM mixed loss [Kotelnikov et al. 2023]: `loss_multi + loss_gauss`.
+
+- Gaussian branch: MSE between true and predicted noise (`mean_flat`).
+- Multinomial branch: the stochastic variational bound `L_t / p_t + KL_prior`,
+  averaged over the batch and divided by the number of categorical features.
+
+`log_x_cat_start` / `log_x_cat_t` are log-one-hot matrices; `t_idx` is the
+1-based CPU timestep vector used to index the schedule.
 """
 function _diffusion_loss(backbone, emb_layer, ps_backbone, ps_emb,
                          st_backbone, st_emb,
-                         X_num_noised, X_cat_noised, x_cat_original,
-                         t_batch, ε_true, d_num, cat_dims)
+                         X_num_noised, log_x_cat_t, log_x_cat_start,
+                         t_batch, coef, ε_true, d_num, plan,
+                         n_timesteps, log_K, lca_T, l1m_T, y_batch)
     # Timestep embedding (sinusoidal)
     t_emb, st_emb_new = Lux.apply(emb_layer, t_batch, ps_emb, st_emb)
 
-    # Feature input (timestep conditioning handled inside backbone via addition)
-    features = if d_num > 0 && length(cat_dims) > 0
-        vcat(X_num_noised, X_cat_noised)
+    features = if d_num > 0 && plan !== nothing
+        vcat(X_num_noised, log_x_cat_t)
     elseif d_num > 0
         X_num_noised
     else
-        X_cat_noised
+        log_x_cat_t
     end
 
-    # Forward pass (backbone projects features + t_emb, adds, then ResNet)
-    output, st_bb_new = Lux.apply(backbone, (features, t_emb), ps_backbone, st_backbone)
+    output, st_bb_new = Lux.apply(backbone, (features, t_emb, y_batch),
+                                  ps_backbone, st_backbone)
 
     loss = 0f0
-    batch = size(output, 2)
 
-    # ── Gaussian MSE loss ──────────────────────────────────────────────
+    # ── Gaussian branch: mean_flat((ε - ε̂)²) ───────────────────────────
     if d_num > 0
         ε_pred = output[1:d_num, :]
-        loss += sum(abs2, ε_pred .- ε_true) / (d_num * batch)
+        loss += sum(abs2, ε_pred .- ε_true) / (d_num * size(output, 2))
     end
 
-    # ── Multinomial cross-entropy loss (GPU-safe, no scalar indexing) ──
-    offset = d_num
-    cat_offset = 0
-    n_cat  = length(cat_dims)
-    if n_cat > 0
-        ce = 0f0
-        for K in cat_dims
-            logits = output[(offset + 1):(offset + K), :]   # (K, batch)
-            # Numerically stable log-softmax
-            m = maximum(logits; dims = 1)
-            log_probs = logits .- m .- log.(sum(exp.(logits .- m); dims = 1))
-            # Vectorized CE: one-hot target · log_probs
-            oh_target = x_cat_original[(cat_offset + 1):(cat_offset + K), :]
-            ce -= sum(oh_target .* log_probs)
-            offset += K
-            cat_offset += K
-        end
-        loss += ce / (n_cat * batch)
+    # ── Multinomial branch: variational bound ──────────────────────────
+    if plan !== nothing
+        n_cat = plan.n_cat
+        model_out_cat = output[(d_num + 1):end, :]
+
+        log_true_prob  = _q_posterior(log_x_cat_start, log_x_cat_t,
+                                      plan, coef, log_K)
+        log_model_prob = _p_pred(model_out_cat, log_x_cat_t,
+                                 plan, coef, log_K)
+
+        kl = _multinomial_kl(log_true_prob, log_model_prob)               # (1, B)
+        decoder_nll = -sum(exp.(log_x_cat_start) .* log_model_prob; dims = 1)
+
+        # At t == 1 the bound uses the decoder likelihood instead of the KL
+        Lt = coef.is_first .* decoder_nll .+ (1f0 .- coef.is_first) .* kl
+
+        # Uniform timestep sampling ⇒ p_t = 1/T, so L_t / p_t = T · L_t
+        vb = Lt .* Float32(n_timesteps) .+ _kl_prior(log_x_cat_start, log_K, lca_T, l1m_T)
+        loss += sum(vb) / (n_cat * size(output, 2))
     end
 
     return loss, (st_bb_new, st_emb_new)
@@ -520,21 +889,40 @@ _to_device(x, dev) = dev(x)
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-Cosine-decay learning rate with optional linear warmup.
+Linear learning-rate annealing, matching `_anneal_lr` in the reference code:
 
-Returns the LR for the given epoch (1-indexed):
-- Epochs 1..warmup: linearly ramp from lr_max/10 to lr_max
-- Epochs warmup+1..total: cosine decay from lr_max to lr_max/100
+    lr = lr_max · (1 - step / total_steps)
+
+`warmup` epochs, when requested, linearly ramp from `lr_max/10` to `lr_max`
+before the anneal begins; with `warmup == 0` this is exactly the paper's
+schedule.
 """
-function _cosine_lr(epoch::Int, total_epochs::Int, lr_max::Float64, warmup::Int)
+function _anneal_lr(epoch::Int, total_epochs::Int, lr_max::Float64, warmup::Int)
     if warmup > 0 && epoch <= warmup
-        # Linear warmup from lr_max/10 to lr_max
         return lr_max * (0.1 + 0.9 * (epoch - 1) / max(warmup - 1, 1))
     end
-    lr_min = lr_max / 100
-    decay_epoch = epoch - warmup
-    decay_total = total_epochs - warmup
-    return lr_min + 0.5 * (lr_max - lr_min) * (1 + cos(π * decay_epoch / decay_total))
+    done = (epoch - warmup) / max(total_epochs - warmup, 1)
+    return lr_max * max(1.0 - done, 0.0)
+end
+
+# ── Exponential moving average of the denoiser weights ────────────────────
+#
+# The reference implementation keeps an EMA copy of the denoiser and saves it
+# alongside the raw weights; sampling uses the EMA copy.
+
+"""
+In-place EMA update `target ← rate · target + (1 - rate) · source`.
+
+Mutates `target`, which is a private copy owned by the training loop and never
+part of an AD trace — matching the reference implementation's `mul_`/`add_`
+and avoiding a full parameter-tree allocation on every step.
+"""
+function _ema_update!(target, source, rate::Float32)
+    Lux.Functors.fmap(target, source) do t, s
+        t isa AbstractArray && (@. t = rate * t + (1f0 - rate) * s)
+        t
+    end
+    return target
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -543,23 +931,37 @@ end
 
 function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
                           st_bb, st_emb,
-                          X_num, X_cat_oh, cat_indices,
-                          betas, alphas_cumprod, cat_dims, d_num,
-                          epochs, batch_size, lr, lr_warmup, rng, dev)
-    T     = length(betas)
+                          X_num, X_cat_oh, y_indices,
+                          sched, cat_dims, d_num,
+                          epochs, batch_size, lr, lr_warmup,
+                          weight_decay, ema_decay, rng, dev)
+    T     = sched.T
     nrows = size(X_num, 2) > 0 ? size(X_num, 2) : size(X_cat_oh, 2)
+    log_K = _to_device(_log_K_vector(cat_dims), dev)
+    plan  = _block_plan(cat_dims, dev)
 
     # Move training data and params to device (GPU if available)
-    X_num_d     = _to_device(X_num, dev)
-    X_cat_oh_d  = _to_device(X_cat_oh, dev)
-    cat_indices_d = _to_device(cat_indices, dev)
-    alphas_cumprod_d = _to_device(alphas_cumprod, dev)
+    X_num_d    = _to_device(X_num, dev)
+    log_x_cat_all = size(X_cat_oh, 1) > 0 ?
+        _to_device(_to_log_onehot(X_cat_oh), dev) : _to_device(X_cat_oh, dev)
+    alphas_cumprod_d = _to_device(sched.alphas_cumprod, dev)
+    sched_d = _device_schedule(sched, dev)
+    lca_T = Float32(sched.log_cumprod_alpha[T])
+    l1m_T = Float32(sched.log_1_min_cumprod_alpha[T])
+    conditional = !isempty(y_indices)
 
     # Merge params for optimizer
     ps_all    = _to_device((; backbone = ps_bb, emb = ps_emb), dev)
     st_bb     = _to_device(st_bb, dev)
     st_emb    = _to_device(st_emb, dev)
-    opt_state = Optimisers.setup(Optimisers.Adam(Float32(lr)), ps_all)
+    # AdamW, matching the reference implementation
+    opt_state = Optimisers.setup(
+        Optimisers.AdamW(Float32(lr), (0.9f0, 0.999f0), Float32(weight_decay)), ps_all)
+
+    # EMA copy of the denoiser weights, used for sampling
+    use_ema  = ema_decay > 0
+    ema_rate = Float32(ema_decay)
+    ps_ema   = use_ema ? Lux.Functors.fmap(x -> x isa AbstractArray ? copy(x) : x, ps_all) : ps_all
 
     t_start    = time()
     epoch_loss = 0.0
@@ -569,8 +971,7 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
     report_every = max(1, epochs ÷ 20)
 
     for epoch in 1:epochs
-        # Cosine LR schedule with optional warmup
-        cur_lr = Float32(_cosine_lr(epoch, epochs, lr, lr_warmup))
+        cur_lr = Float32(_anneal_lr(epoch, epochs, lr, lr_warmup))
         Optimisers.adjust!(opt_state; eta = cur_lr)
 
         epoch_loss = 0.0
@@ -582,12 +983,20 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
             bs   = length(idx)
 
             t_batch = rand(rng, 1:T, bs)
-            # Move timesteps to device as Float32 (outside AD-traced code)
-            t_batch_d = _to_device(Float32.(t_batch), dev)
+            # One host→device copy of the timesteps; every schedule coefficient
+            # is then gathered on-device from `sched_d`.
+            t_d = _to_device(t_batch, dev)
+            # Timestep embedding uses 0-based t, as in the reference code
+            t_batch_d = Float32.(t_d .- 1)
+            coef = _batch_coefs(sched_d, t_d)
+            y_batch = conditional ? _to_device(y_indices[idx], dev) : nothing
+
+            # Slice with a device-resident index: indexing a device array with a
+            # host vector forces a slow host-driven gather (~20 ms per slice).
+            idx_d = _to_device(idx, dev)
 
             # Forward diffusion (slice on device)
-            x_num_batch = d_num > 0 ? X_num_d[:, idx] : _to_device(zeros(Float32, 0, bs), dev)
-            x_cat_batch = size(X_cat_oh_d, 1) > 0 ? X_cat_oh_d[:, idx] : _to_device(zeros(Float32, 0, bs), dev)
+            x_num_batch = d_num > 0 ? X_num_d[:, idx_d] : _to_device(zeros(Float32, 0, bs), dev)
 
             if d_num > 0
                 x_num_noised, ε = _gaussian_forward(x_num_batch, alphas_cumprod_d, t_batch, rng, dev)
@@ -596,10 +1005,13 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
                 ε = _to_device(zeros(Float32, 0, bs), dev)
             end
 
-            if size(x_cat_batch, 1) > 0
-                x_cat_noised = _multinomial_forward(x_cat_batch, cat_dims, alphas_cumprod_d, t_batch, dev)
+            if plan !== nothing
+                log_x_cat_start = log_x_cat_all[:, idx_d]
+                log_x_cat_t = _multinomial_q_sample(log_x_cat_start, plan, coef,
+                                                    log_K, rng, dev)
             else
-                x_cat_noised = _to_device(zeros(Float32, 0, bs), dev)
+                log_x_cat_start = _to_device(zeros(Float32, 0, bs), dev)
+                log_x_cat_t     = log_x_cat_start
             end
 
             # Gradient (dispatched through AD backend — REQ-DIF-009)
@@ -607,14 +1019,16 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
                 _diffusion_loss(backbone, emb_layer,
                                 p.backbone, p.emb,
                                 st_bb, st_emb,
-                                x_num_noised, x_cat_noised, x_cat_batch,
-                                t_batch_d, ε, d_num, cat_dims)
+                                x_num_noised, log_x_cat_t, log_x_cat_start,
+                                t_batch_d, coef, ε, d_num, plan,
+                                T, log_K, lca_T, l1m_T, y_batch)
             end
             st_bb, st_emb = states_new
             epoch_loss += loss
             n_batches  += 1
 
             opt_state, ps_all = Optimisers.update(opt_state, ps_all, g)
+            use_ema && _ema_update!(ps_ema, ps_all, ema_rate)
         end
 
         # Progress report
@@ -626,7 +1040,8 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
         end
     end
 
-    return ps_all.backbone, ps_all.emb, st_bb, st_emb
+    ps_out = use_ema ? ps_ema : ps_all
+    return ps_out.backbone, ps_out.emb, st_bb, st_emb
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -688,11 +1103,18 @@ end
 
 function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
                        st_bb, st_emb,
-                       X_num, X_cat_oh, cat_indices,
-                       betas, alphas_cumprod, cat_dims, d_num,
-                       epochs, batch_size, lr, lr_warmup, privacy, rng, dev)
-    T     = length(betas)
+                       X_num, X_cat_oh, y_indices,
+                       sched, cat_dims, d_num,
+                       epochs, batch_size, lr, lr_warmup,
+                       weight_decay, privacy, rng, dev)
+    T     = sched.T
     nrows = size(X_num, 2) > 0 ? size(X_num, 2) : size(X_cat_oh, 2)
+    log_K = _to_device(_log_K_vector(cat_dims), dev)
+    plan  = _block_plan(cat_dims, dev)
+    sched_d = _device_schedule(sched, dev)
+    lca_T = Float32(sched.log_cumprod_alpha[T])
+    l1m_T = Float32(sched.log_1_min_cumprod_alpha[T])
+    conditional = !isempty(y_indices)
 
     # DP-SGD parameters
     C = 1.0                                     # gradient clip norm
@@ -716,22 +1138,22 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
           "achieved ε ≈ $(round(_rdp_accountant(σ_noise, q, total_steps, privacy.delta); digits=3))"
 
     # Move training data and params to device
-    X_num_d     = _to_device(X_num, dev)
-    X_cat_oh_d  = _to_device(X_cat_oh, dev)
-    cat_indices_d = _to_device(cat_indices, dev)
-    alphas_cumprod_d = _to_device(alphas_cumprod, dev)
+    X_num_d    = _to_device(X_num, dev)
+    log_x_cat_all = size(X_cat_oh, 1) > 0 ?
+        _to_device(_to_log_onehot(X_cat_oh), dev) : _to_device(X_cat_oh, dev)
+    alphas_cumprod_d = _to_device(sched.alphas_cumprod, dev)
 
     ps_all    = _to_device((; backbone = ps_bb, emb = ps_emb), dev)
     st_bb     = _to_device(st_bb, dev)
     st_emb    = _to_device(st_emb, dev)
-    opt_state = Optimisers.setup(Optimisers.Adam(Float32(lr)), ps_all)
+    opt_state = Optimisers.setup(
+        Optimisers.AdamW(Float32(lr), (0.9f0, 0.999f0), Float32(weight_decay)), ps_all)
 
     t_start      = time()
     report_every = max(1, epochs ÷ 20)
 
     for epoch in 1:epochs
-        # Cosine LR schedule with optional warmup
-        cur_lr = Float32(_cosine_lr(epoch, epochs, lr, lr_warmup))
+        cur_lr = Float32(_anneal_lr(epoch, epochs, lr, lr_warmup))
         Optimisers.adjust!(opt_state; eta = cur_lr)
 
         epoch_loss = 0.0
@@ -745,7 +1167,6 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
             t_batch = rand(rng, 1:T, bs)
 
             x_num_batch = d_num > 0 ? X_num_d[:, idx] : _to_device(zeros(Float32, 0, bs), dev)
-            x_cat_batch = size(X_cat_oh_d, 1) > 0 ? X_cat_oh_d[:, idx] : _to_device(zeros(Float32, 0, bs), dev)
 
             if d_num > 0
                 x_num_noised, ε = _gaussian_forward(x_num_batch, alphas_cumprod_d, t_batch, rng, dev)
@@ -754,10 +1175,14 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
                 ε = _to_device(zeros(Float32, 0, bs), dev)
             end
 
-            if size(x_cat_batch, 1) > 0
-                x_cat_noised = _multinomial_forward(x_cat_batch, cat_dims, alphas_cumprod_d, t_batch, dev)
+            if plan !== nothing
+                log_x_cat_start = log_x_cat_all[:, idx]
+                batch_coef = _batch_coefs(sched_d, _to_device(t_batch, dev))
+                log_x_cat_t = _multinomial_q_sample(log_x_cat_start, plan, batch_coef,
+                                                    log_K, rng, dev)
             else
-                x_cat_noised = _to_device(zeros(Float32, 0, bs), dev)
+                log_x_cat_start = _to_device(zeros(Float32, 0, bs), dev)
+                log_x_cat_t     = log_x_cat_start
             end
 
             # ── Per-sample gradient clipping ────────────────────────────
@@ -766,17 +1191,20 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
 
             for si in 1:bs
                 xn_i  = d_num > 0 ? x_num_noised[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
-                xc_i  = size(x_cat_noised, 1) > 0 ? x_cat_noised[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
-                xc_orig_i = size(x_cat_batch, 1) > 0 ? x_cat_batch[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
-                t_i_d = _to_device(Float32.([t_batch[si]]), dev)
+                xc_i  = size(log_x_cat_t, 1) > 0 ? log_x_cat_t[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
+                xc_orig_i = size(log_x_cat_start, 1) > 0 ? log_x_cat_start[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
+                t_i_d = _to_device(Float32.([t_batch[si] - 1]), dev)
                 ε_i   = d_num > 0 ? ε[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
+                y_i   = conditional ? _to_device(y_indices[idx[si]:idx[si]], dev) : nothing
+                coef_i = _scalar_coefs(sched, t_batch[si])
 
                 l, _, g = _compute_grad(AD_BACKEND, ps_all) do p
                     _diffusion_loss(backbone, emb_layer,
                                     p.backbone, p.emb,
                                     st_bb, st_emb,
                                     xn_i, xc_i, xc_orig_i,
-                                    t_i_d, ε_i, d_num, cat_dims)
+                                    t_i_d, coef_i, ε_i, d_num, plan,
+                                    T, log_K, lca_T, l1m_T, y_i)
                 end
                 batch_loss += l
                 gnorm = sqrt(_grad_sqnorm(g))
@@ -815,150 +1243,86 @@ end
 """
 Sample `n` rows from a trained TabDDPM model via reverse denoising.
 
-When `sampling_steps < T`, uses DDIM [Song et al. 2020] for the Gaussian
-reverse step and the natural subsequence posterior for categoricals
-[Hoogeboom et al. 2021].  `ddim_eta` controls stochasticity (0 =
-deterministic DDIM, 1 ≈ DDPM variance).
+Follows `GaussianMultinomialDiffusion.sample` in the reference implementation:
+the full `T`-step DDPM reverse process, with the Gaussian branch using the
+`eps` parametrization and the posterior mean/variance, and the categorical
+branch stepping through the multinomial posterior in log space.
+
+`y_idx` supplies the class label per row for conditional models, or `nothing`.
 """
 function _denoise_sample(backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
-                         betas, alphas_cumprod, d_num, cat_dims, n, rng;
-                         sampling_steps::Int = 0, ddim_eta::Float32 = 0f0)
-    T = length(betas)
+                         sched, d_num, cat_dims, n, rng, y_idx)
+    T = sched.T
     d_cat_total = sum(cat_dims; init = 0)
 
-    # Build timestep subsequence (1-indexed, descending)
-    S = sampling_steps > 0 ? min(sampling_steps, T) : T
-    if S == T
-        # Full schedule: [T, T-1, …, 1]
-        timesteps = collect(T:-1:1)
-    else
-        # Uniformly-spaced subsequence from the training schedule
-        # E.g. S=50, T=1000 → [1000, 980, 960, …, 20]
-        timesteps = reverse(round.(Int, range(1, T; length = S)))
-        # Ensure no duplicates and the endpoints are included
-        timesteps = unique(timesteps)
-        S = length(timesteps)
-    end
-
-    # Detect device from params (they're already on the target device)
+    st_bb = Lux.testmode(st_bb)
     gdev, cdev = _get_devices()
+    log_K = _to_device(_log_K_vector(cat_dims), gdev)
+    plan  = _block_plan(cat_dims, gdev)
 
-    # Initialize from pure noise on the compute device
+    # Reverse-process variance: [posterior_variance[2], betas[2:T]]
+    model_variance = vcat(sched.posterior_variance[2], sched.betas[2:end])
+    model_log_variance = log.(model_variance)
+    sqrt_recip_ac   = sqrt.(1f0 ./ sched.alphas_cumprod)
+    sqrt_recipm1_ac = sqrt.(1f0 ./ sched.alphas_cumprod .- 1f0)
+
+    y_dev = y_idx === nothing ? nothing : _to_device(y_idx, gdev)
+
+    # Start from pure noise / a uniform categorical draw
     x_num = d_num > 0 ? _to_device(randn(rng, Float32, d_num, n), gdev) :
                         _to_device(zeros(Float32, 0, n), gdev)
-    x_cat = d_cat_total > 0 ? begin
-        # Uniform initialization for categoricals
-        oh = zeros(Float32, d_cat_total, n)
-        offset = 0
-        for K in cat_dims
-            oh[(offset + 1):(offset + K), :] .= 1f0 / K
-            offset += K
-        end
-        _to_device(oh, gdev)
-    end : _to_device(zeros(Float32, 0, n), gdev)
+    log_x_cat = if d_cat_total > 0
+        _log_sample_categorical(_to_device(zeros(Float32, d_cat_total, n), gdev),
+                                plan, rng, gdev)
+    else
+        _to_device(zeros(Float32, 0, n), gdev)
+    end
 
-    for step_idx in 1:S
-        t    = timesteps[step_idx]
-        # ᾱ at the destination (previous) timestep
-        ᾱ_prev = step_idx < S ? alphas_cumprod[timesteps[step_idx + 1]] : 1f0
-        ᾱ_t    = alphas_cumprod[t]
-
-        # Move timesteps to device as Float32 (match st_emb.freqs device)
-        t_batch = _to_device(Float32.(fill(t, n)), gdev)
-
-        # Timestep embedding (runs on device since ps_emb/st_emb are there)
+    for t in T:-1:1
+        coef = _scalar_coefs(sched, t)
+        # Timestep embedding uses 0-based t, as in the reference code
+        t_batch = _to_device(fill(Float32(t - 1), n), gdev)
         t_emb, _ = Lux.apply(emb_layer, t_batch, ps_emb, st_emb)
 
-        # Feature input (timestep handled inside backbone via addition)
         features = if d_num > 0 && d_cat_total > 0
-            vcat(x_num, x_cat)
+            vcat(x_num, log_x_cat)
         elseif d_num > 0
             x_num
         else
-            x_cat
+            log_x_cat
         end
 
-        output, _ = Lux.apply(backbone, (features, t_emb), ps_bb, st_bb)
+        output, _ = Lux.apply(backbone, (features, t_emb, y_dev), ps_bb, st_bb)
 
-        # ── Gaussian reverse step (DDIM, Song et al. 2020) ─────────
+        # ── Gaussian reverse step ──────────────────────────────────────
         if d_num > 0
             ε_pred = output[1:d_num, :]
 
-            # Predict x̂₀ from ε-prediction
-            x0_pred = (x_num .- sqrt(1f0 - ᾱ_t + 1f-8) .* ε_pred) ./
-                      sqrt(ᾱ_t + 1f-8)
+            # x̂₀ from the ε parametrization
+            x0_pred = sqrt_recip_ac[t] .* x_num .- sqrt_recipm1_ac[t] .* ε_pred
 
-            if step_idx < S   # not the final step
-                # DDIM variance: σ² = η² · (1-ᾱ_prev)/(1-ᾱ_t) · (1-ᾱ_t/ᾱ_prev)
-                σ² = ddim_eta^2 *
-                     ((1f0 - ᾱ_prev) / (1f0 - ᾱ_t + 1f-8)) *
-                     (1f0 - ᾱ_t / (ᾱ_prev + 1f-8))
-                σ  = sqrt(max(σ², 0f0))
+            # Posterior mean q(x_{t-1} | x_t, x̂₀)
+            post_mean = sched.posterior_mean_coef1[t] .* x0_pred .+
+                        sched.posterior_mean_coef2[t] .* x_num
 
-                # Direction pointing to x_t
-                dir_coef = sqrt(max(1f0 - ᾱ_prev - σ², 0f0))
-
-                x_num = sqrt(ᾱ_prev) .* x0_pred .+
-                        dir_coef .* ε_pred
-
-                if σ > 0f0
-                    z = _to_device(randn(rng, Float32, d_num, n), gdev)
-                    x_num = x_num .+ σ .* z
-                end
+            if t > 1   # no noise at the final step
+                z = _to_device(randn(rng, Float32, d_num, n), gdev)
+                x_num = post_mean .+ exp(0.5f0 * model_log_variance[t]) .* z
             else
-                # Final step: deterministic
-                x_num = x0_pred
+                x_num = post_mean
             end
         end
 
-        # ── Multinomial reverse step (Hoogeboom et al. 2021) ────────
-        # Posterior: q(x_prev|x_t, x̂₀) ∝ q(x_t|x_prev) · q(x_prev|x̂₀)
-        # For skipped steps, α̃ = ᾱ_t/ᾱ_prev (effective retention).
-        # Sampled via the Gumbel-max trick (GPU-native, no CPU transfer).
+        # ── Multinomial reverse step ───────────────────────────────────
         if d_cat_total > 0
-            # Effective single-step retention for the skip
-            α_eff = ᾱ_t / (ᾱ_prev + 1f-20)
-
-            offset_in  = d_num
-            offset_out = 0
-            for K in cat_dims
-                logits = output[(offset_in + 1):(offset_in + K), :]
-
-                # Predict x̂₀ probabilities from logits (softmax)
-                m = maximum(logits; dims = 1)
-                exp_logits = exp.(logits .- m)
-                probs_x0 = exp_logits ./ sum(exp_logits; dims = 1)
-
-                # Current one-hot state x_t for this variable
-                x_t_block = x_cat[(offset_out + 1):(offset_out + K), :]
-
-                # Likelihood: q(x_t | x_prev=k) = α̃·[x_t]_k + (1−α̃)/K
-                log_likelihood = log.(α_eff .* x_t_block .+ (1f0 - α_eff) / K .+ 1f-20)
-                # Prior:      q(x_prev=k | x̂₀)  = ᾱ_prev·[x̂₀]_k + (1−ᾱ_prev)/K
-                log_prior = log.(ᾱ_prev .* probs_x0 .+ (1f0 - ᾱ_prev) / K .+ 1f-20)
-
-                # Unnormalized log-posterior (normalization is unnecessary
-                # for Gumbel-max since argmax is shift-invariant)
-                log_unnorm = log_likelihood .+ log_prior
-
-                # Gumbel-max trick: k = argmax(log p_k + Gumbel(0,1)) ~ Cat(p)
-                u = _to_device(rand(rng, Float32, K, n), gdev)
-                gumbel = -log.(-log.(u .+ 1f-10) .+ 1f-10)
-                noisy = log_unnorm .+ gumbel
-
-                # One-hot from column-wise argmax (fully on GPU)
-                col_max = maximum(noisy; dims = 1)
-                new_oh = Float32.(noisy .== col_max)
-
-                # In-place update (not in AD-traced code, mutation is safe)
-                x_cat[(offset_out + 1):(offset_out + K), :] .= new_oh
-
-                offset_in  += K
-                offset_out += K
-            end
+            model_out_cat = output[(d_num + 1):end, :]
+            log_model_prob = _p_pred(model_out_cat, log_x_cat, plan, coef, log_K)
+            log_x_cat = _log_sample_categorical(log_model_prob, plan, rng, gdev)
         end
     end
 
+    # Categoricals come back as one-hot for the caller's argmax decoding
+    x_cat = d_cat_total > 0 ? exp.(log_x_cat) : log_x_cat
     return x_num, x_cat
 end
 
@@ -997,8 +1361,12 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
     end
 
     # ── Preprocess ─────────────────────────────────────────────────────
+    if gen.target !== nothing && !(gen.target in col_names)
+        throw(ArgumentError("target column :$(gen.target) not found in the table"))
+    end
+
     X_num, X_cat_oh, cat_indices, info = _preprocess(
-        cols, col_names, col_kinds, id_set, hints, nrows)
+        cols, col_names, col_kinds, id_set, hints, nrows; target = gen.target)
 
     d_num       = info.d_num
     d_cat_total = info.d_cat_total
@@ -1008,19 +1376,27 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
         error("No statistical columns for DiffusionGenerator after preprocessing.")
     end
 
-    # ── Noise schedule ─────────────────────────────────────────────────
-    n_steps = 1000
-    betas, alphas_cumprod = _linear_schedule(n_steps)
+    # ── Noise schedule (cosine, the TabDDPM default) ───────────────────
+    n_steps = gen.num_timesteps
+    betas, alphas_cumprod = _cosine_schedule(n_steps)
+    sched = _schedule_constants(betas)
 
     # ── Build model ────────────────────────────────────────────────────
     embed_dim = gen.embed_dim
-    hidden    = gen.hidden_dim > 0 ? gen.hidden_dim : min(256, max(64, 4 * (d_num + d_cat_total)))
-    n_blocks  = gen.n_blocks
     d_in      = d_num + d_cat_total   # timestep handled via addition, not concat
+    n_classes = length(info.target_levels)
+    layer_widths = if !isempty(gen.d_layers)
+        gen.d_layers
+    else
+        hidden = gen.hidden_dim > 0 ? gen.hidden_dim :
+                 min(256, max(64, 4 * (d_num + d_cat_total)))
+        fill(hidden, gen.n_blocks)
+    end
 
     backbone, _ = _build_model(d_in, d_num, cat_dims_v;
-                               hidden = hidden, n_blocks = n_blocks,
-                               embed_dim = embed_dim, dropout = gen.dropout)
+                               d_layers = layer_widths,
+                               embed_dim = embed_dim, dropout = gen.dropout,
+                               n_classes = n_classes)
     emb_layer = SinusoidalEmbedding(embed_dim)
 
     lux_rng = Random.MersenneTwister(42)  # deterministic init
@@ -1029,23 +1405,24 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
 
     # ── Detect device (GPU if available) ─────────────────────────────
     gdev, cdev = _get_devices()
-    @info "DiffusionGenerator: training on $(gdev)"
+    @info "DiffusionGenerator: training on $(gdev)" *
+          (n_classes > 0 ? " (class-conditional on :$(gen.target), $n_classes classes)" : "")
 
     # ── Train ──────────────────────────────────────────────────────────
     if gen.dp
         ps_bb, ps_emb, st_bb, st_emb = _train_dpsgd!(
             backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
-            X_num, X_cat_oh, cat_indices,
-            betas, alphas_cumprod, cat_dims_v, d_num,
+            X_num, X_cat_oh, info.y_indices,
+            sched, cat_dims_v, d_num,
             gen.epochs, gen.batch_size, gen.lr, gen.lr_warmup,
-            privacy, rng, gdev)
+            gen.weight_decay, privacy, rng, gdev)
     else
         ps_bb, ps_emb, st_bb, st_emb = _train_standard!(
             backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
-            X_num, X_cat_oh, cat_indices,
-            betas, alphas_cumprod, cat_dims_v, d_num,
+            X_num, X_cat_oh, info.y_indices,
+            sched, cat_dims_v, d_num,
             gen.epochs, gen.batch_size, gen.lr, gen.lr_warmup,
-            rng, gdev)
+            gen.weight_decay, gen.ema_decay, rng, gdev)
     end
 
     # ── Move trained params back to CPU for storage / serialization ──
@@ -1064,8 +1441,10 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
     return FittedDiffusionModel(
         col_names, col_kinds,
         info.num_cols, info.cat_cols,
-        info.num_means, info.num_stds,
+        info.num_references,
         info.cat_levels, info.cat_dims,
+        info.num_round,
+        gen.target, info.target_levels, info.class_dist,
         full_model, full_ps, full_st,
         n_steps, betas, alphas_cumprod,
         miss, nrows,
@@ -1078,17 +1457,15 @@ end
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    sample(model::FittedDiffusionModel, n; rng, sampling_steps, ddim_eta)
+    sample(model::FittedDiffusionModel, n; rng)
 
-Generate `n` synthetic rows.  `sampling_steps` (default: full T=1000)
-selects how many reverse-diffusion steps to run — fewer steps is faster
-at some quality cost.  `ddim_eta` (default 0, deterministic DDIM)
-controls stochasticity when step-skipping [Song et al. 2020].
+Generate `n` synthetic rows by running the full reverse diffusion process
+[Kotelnikov et al. 2023].  For a class-conditional model, labels are first
+drawn from the empirical class distribution of the training data and the
+denoiser is conditioned on them.
 """
 function sample(model::FittedDiffusionModel, n::Int;
-                rng::AbstractRNG = model.rng,
-                sampling_steps::Int = 0,
-                ddim_eta::Float64 = 0.0)
+                rng::AbstractRNG = model.rng)
     n ≥ 1 || throw(ArgumentError("n must be at least 1, got $n"))
 
     if n > 10 * model.n_original
@@ -1105,6 +1482,7 @@ function sample(model::FittedDiffusionModel, n::Int;
 
     d_num     = length(model.num_columns)
     cat_dims  = model.cat_dims
+    sched     = _schedule_constants(model.betas)
 
     # ── Move model to best available device for sampling ───────────────
     gdev, cdev = _get_devices()
@@ -1113,13 +1491,18 @@ function sample(model::FittedDiffusionModel, n::Int;
     st_bb  = _to_device(full_st.backbone, gdev)
     st_emb = _to_device(full_st.emb, gdev)
 
+    # ── Draw class labels from the empirical distribution ──────────────
+    y_idx = if model.target === nothing || isempty(model.class_dist)
+        nothing
+    else
+        cdf = cumsum(model.class_dist)
+        [searchsortedfirst(cdf, rand(rng)) for _ in 1:n]
+    end
+
     # ── Reverse denoise ────────────────────────────────────────────────
     x_num, x_cat = _denoise_sample(
         backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
-        model.betas, model.alphas_cumprod,
-        d_num, cat_dims, n, rng;
-        sampling_steps = sampling_steps,
-        ddim_eta = Float32(ddim_eta))
+        sched, d_num, cat_dims, n, rng, y_idx)
 
     # Move results back to CPU for post-processing
     x_num = _to_device(x_num, cdev)
@@ -1128,20 +1511,25 @@ function sample(model::FittedDiffusionModel, n::Int;
     # ── Unpack into result dict ────────────────────────────────────────
     result = Dict{Symbol, Vector}()
 
-    # Numeric columns: reverse z-score normalization
+    # Numeric columns: inverse Gaussian quantile transform
     for (j, name) in enumerate(model.num_columns)
-        μ = model.num_means[j]
-        σ = model.num_stds[j]
-        raw = x_num[j, :] .* σ .+ μ
+        ref = model.num_references[j]
+        z_vals = x_num[j, :]
+        raw = [_quantile_inverse(Float32(z), ref) for z in z_vals]
 
-        # Find original kind
         idx = findfirst(==(name), model.column_names)
         kind = model.column_kinds[idx]
-        if kind == :integer
+        if kind == :integer || model.num_round[j]
             result[name] = round.(Int64, raw)
         else
             result[name] = Float64.(raw)
         end
+    end
+
+    # Target column: the labels the model was conditioned on
+    if model.target !== nothing && y_idx !== nothing
+        lvls = model.target_levels
+        result[model.target] = [lvls[k] for k in y_idx]
     end
 
     # Categorical columns: decode one-hot

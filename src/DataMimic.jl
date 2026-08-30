@@ -8,6 +8,7 @@ import Copulas
 import LinearAlgebra
 import Optimisers
 import EvoTrees
+import SpecialFunctions
 
 include("types.jl")
 include("detect.jl")

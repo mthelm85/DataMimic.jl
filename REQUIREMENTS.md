@@ -209,9 +209,9 @@ a later phase.
 | ID | Requirement | MoSCoW | Phase |
 |----|-------------|--------|-------|
 | **REQ-DIF-001** | `DiffusionGenerator` shall implement the TabDDPM architecture \[Kotelnikov et al. 2023\]. | Done | 3 |
-| **REQ-DIF-002** | `DiffusionGenerator` shall use Gaussian diffusion for numerical features \[Ho et al. 2020\]. | Done | 3 |
-| **REQ-DIF-003** | `DiffusionGenerator` shall use multinomial diffusion for categorical features \[Hoogeboom et al. 2021\]. | Done | 3 |
-| **REQ-DIF-004** | `DiffusionGenerator` shall use a ResNet-style MLP with sinusoidal timestep embedding as the denoising backbone. | Done | 3 |
+| **REQ-DIF-002** | `DiffusionGenerator` shall use Gaussian diffusion for numerical features \[Ho et al. 2020\], with the ε parametrization, an MSE objective, and a cosine β schedule \[Nichol & Dhariwal 2021\]. | Done | 3 |
+| **REQ-DIF-003** | `DiffusionGenerator` shall use multinomial diffusion for categorical features \[Hoogeboom et al. 2021\], carrying categorical state in log space and training against the stochastic variational bound (`L_t / p_t + KL_prior`, normalized by the number of categorical features) under the `x0` parametrization. | Done | 3 |
+| **REQ-DIF-004** | `DiffusionGenerator` shall use the TabDDPM `MLPDiffusion` backbone: a plain MLP of `Dense → ReLU → Dropout` blocks (no normalization, no residual connections) with a sinusoidal timestep embedding added once at the input projection. | Done | 3 |
 | **REQ-DIF-005** | WHEN `dp=true`, `DiffusionGenerator` shall train using DP-SGD with per-sample gradient clipping and Gaussian noise injection \[Abadi et al. 2016\]. | Done | 3 |
 | **REQ-DIF-006** | WHILE `dp=true`, `DiffusionGenerator` shall track cumulative privacy spend via Rényi DP accounting \[Mironov 2017\]. | Done | 3 |
 | **REQ-DIF-007** | `DiffusionGenerator` shall be implemented as a Lux.jl package extension (`LuxExt`). | Done | 3 |
@@ -221,8 +221,12 @@ a later phase.
 | **REQ-DIF-011** | WHEN training completes on GPU, the `LuxExt` shall move trained parameters back to CPU before storing them in `FittedDiffusionModel`. | Done | 4b |
 | **REQ-DIF-012** | WHEN sampling from a `FittedDiffusionModel`, the `LuxExt` shall move the model to the available device for the denoising loop, then move results back to CPU for post-processing. | Done | 4b |
 | **REQ-DIF-013** | GPU support shall not introduce any new dependencies on DataMimic — `LuxCUDA` is the user's opt-in, detected at runtime. | Done | 4b |
-| **REQ-DIF-014** | `DiffusionGenerator` shall use cosine-decay learning rate scheduling with optional linear warmup, controlled by `lr` (peak rate) and `lr_warmup` (warmup epochs). | Done | 4b |
-| **REQ-DIF-015** | `DiffusionGenerator` shall expose network architecture hyperparameters (`hidden_dim`, `n_blocks`, `embed_dim`, `dropout`) for user tuning, with sensible defaults matching TabDDPM [Kotelnikov et al. 2023]. | Done | 4b |
+| **REQ-DIF-014** | `DiffusionGenerator` shall anneal the learning rate linearly to zero (`lr · (1 - step/total)`), matching the reference trainer, with `lr_warmup` optionally prepending a linear warmup. | Done | 4b |
+| **REQ-DIF-015** | `DiffusionGenerator` shall expose network architecture hyperparameters (`d_layers`, `hidden_dim`, `n_blocks`, `embed_dim`, `dropout`, `num_timesteps`) for user tuning, with sensible defaults matching TabDDPM [Kotelnikov et al. 2023]. | Done | 4b |
+| **REQ-DIF-016** | `DiffusionGenerator` shall apply Gaussian quantile normalization to continuous features before training (empirical CDF → Φ⁻¹) and the inverse transform during sampling, matching TabDDPM §4.1 [Kotelnikov et al. 2023]. | Done | 4b |
+| **REQ-DIF-017** | WHEN `target` names a column, `DiffusionGenerator` shall train class-conditionally — adding `silu(label_emb(y))` to the timestep embedding — and sampling shall draw labels from the empirical class distribution before generating features conditioned on them. WHEN `target` is `nothing`, the model shall be unconditional. | Done | 4c |
+| **REQ-DIF-018** | `DiffusionGenerator` shall optimize with AdamW (`weight_decay`) and shall maintain an exponential moving average of the denoiser weights (`ema_decay`), using the EMA weights for sampling. | Done | 4c |
+| **REQ-DIF-019** | `sample(::FittedDiffusionModel, n)` shall run the full `num_timesteps` DDPM reverse process, using the Gaussian posterior mean/variance for numeric features and the multinomial posterior with Gumbel-max draws for categoricals. | Done | 4c |
 
 ---
 
