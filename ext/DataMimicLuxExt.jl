@@ -77,6 +77,12 @@ to the original feature scale via Φ(z) → interpolation in sorted reference.
 """
 function _quantile_inverse(z::Float32, reference::Vector{Float32})
     n = length(reference)
+    # A diverged reverse process can hand back Inf or NaN.  Callers are
+    # expected to discard those rows, but guard here so the failure surfaces
+    # as a discardable extreme rather than as `InexactError` from
+    # `floor(Int, NaN)` several frames down.
+    isfinite(z) || return isnan(z) ? reference[(n + 1) ÷ 2] :
+                          (z > 0 ? reference[end] : reference[1])
     # Normal CDF: Φ(z) = 0.5 · (1 + erf(z / √2))
     q = 0.5 * (1.0 + SpecialFunctions.erf(Float64(z) / sqrt(2.0)))
     q = clamp(q, 0.5 / n, 1.0 - 0.5 / n)
@@ -1055,7 +1061,7 @@ function _logsumexp(xs)
     return m + log(sum(exp.(xs .- m)))
 end
 
-"""Log of n! — hand-rolled to avoid a SpecialFunctions.jl dependency."""
+"""Log of n!, summed directly — the arguments here are small integer orders."""
 function _logfactorial(n::Int)
     n <= 1 && return 0.0
     return sum(log(Float64(i)) for i in 2:n)
@@ -1275,6 +1281,79 @@ end
 # ═══════════════════════════════════════════════════════════════════════════
 # 11. Reverse Sampling (Denoising)
 # ═══════════════════════════════════════════════════════════════════════════
+
+"""
+Draw `n` rows, discarding any whose numeric block came back non-finite.
+
+The ε-parametrization divides by `√ᾱ`, which at the noisiest timesteps is
+around 2000 for a 100-step cosine schedule.  That amplifies the model's noise
+prediction error by the same factor, so an undertrained model can drive the
+reverse process to overflow and produce `Inf` or `NaN` rows.  The reference
+implementation expects this and filters such rows before returning; this does
+the same, redrawing to make up the shortfall.
+
+Persistent failure means the model itself is unusable rather than unlucky, so
+it raises with the likely cause instead of returning quietly corrupted data.
+"""
+function _denoise_sample_finite(backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
+                                sched, d_num, cat_dims, n, rng, y_idx;
+                                max_attempts::Int = 8)
+    d_cat_total = sum(cat_dims; init = 0)
+    num_parts = Matrix{Float32}[]
+    cat_parts = Matrix{Float32}[]
+    y_parts   = Vector{Int}[]
+    have = 0
+
+    for attempt in 1:max_attempts
+        want = n - have
+        want <= 0 && break
+        # Over-draw a little after the first pass, so a low yield does not
+        # need many rounds to converge.
+        draw = attempt == 1 ? want : min(2 * want, 4 * n)
+
+        y_draw = y_idx === nothing ? nothing : y_idx[1:min(draw, length(y_idx))]
+        if y_idx !== nothing && draw > length(y_idx)
+            y_draw = vcat(y_idx, y_idx[1:(draw - length(y_idx))])
+        end
+
+        xn, xc = _denoise_sample(backbone, emb_layer, ps_bb, ps_emb,
+                                 st_bb, st_emb, sched, d_num, cat_dims,
+                                 draw, rng, y_draw)
+        xn_h = Array(xn); xc_h = Array(xc)
+
+        keep = d_num > 0 ?
+            [all(isfinite, view(xn_h, :, j)) for j in 1:size(xn_h, 2)] :
+            trues(size(xc_h, 2))
+        nkeep = count(keep)
+        if nkeep > 0
+            take = min(nkeep, n - have)
+            idx  = findall(keep)[1:take]
+            push!(num_parts, d_num > 0 ? xn_h[:, idx] : zeros(Float32, 0, take))
+            push!(cat_parts, d_cat_total > 0 ? xc_h[:, idx] : zeros(Float32, 0, take))
+            y_draw !== nothing && push!(y_parts, y_draw[idx])
+            have += take
+        end
+
+        if attempt == 1 && nkeep < draw
+            @warn "Discarded $(draw - nkeep) of $draw sampled rows with " *
+                  "non-finite values and redrew them. This usually means the " *
+                  "diffusion model is undertrained — try more epochs, a lower " *
+                  "learning rate, or fewer timesteps."
+        end
+    end
+
+    if have < n
+        error("DiffusionGenerator could not draw $n finite rows " *
+              "($have after $max_attempts attempts). The reverse process is " *
+              "diverging, which points at an undertrained or unstable model: " *
+              "try more epochs, a lower learning rate, or fewer timesteps.")
+    end
+
+    x_num = d_num > 0 ? reduce(hcat, num_parts) : zeros(Float32, 0, n)
+    x_cat = d_cat_total > 0 ? reduce(hcat, cat_parts) : zeros(Float32, 0, n)
+    y_out = isempty(y_parts) ? nothing : reduce(vcat, y_parts)
+    return x_num, x_cat, y_out
+end
 
 """
 Sample `n` rows from a trained TabDDPM model via reverse denoising.
@@ -1535,10 +1614,11 @@ function sample(model::FittedDiffusionModel, n::Int;
         [searchsortedfirst(cdf, rand(rng)) for _ in 1:n]
     end
 
-    # ── Reverse denoise ────────────────────────────────────────────────
-    x_num, x_cat = _denoise_sample(
+    # ── Reverse denoise (rejecting any non-finite rows) ────────────────
+    x_num, x_cat, y_kept = _denoise_sample_finite(
         backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
         sched, d_num, cat_dims, n, rng, y_idx)
+    y_kept !== nothing && (y_idx = y_kept)
 
     # Move results back to CPU for post-processing
     x_num = _to_device(x_num, cdev)
