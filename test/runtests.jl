@@ -976,6 +976,44 @@ using Lux, Zygote
                 DiffusionGenerator(; dp = false, epochs = 2),
                 tbl; privacy = pb, rng = MersenneTwister(42))
         end
+
+        # REQ-DIF-006: the accountant models the *Poisson*-subsampled
+        # Gaussian mechanism.  At q = 1 that degenerates to the plain
+        # Gaussian mechanism, whose RDP is exactly α/(2σ²) — a closed form
+        # the implementation must reproduce.
+        @testset "RDP accountant reduces to the Gaussian mechanism at q=1" begin
+            ext = Base.get_extension(DataMimic, :DataMimicLuxExt)
+            σ, δ = 2.0, 1e-5
+            alphas = vcat(collect(2:10), collect(12:2:64), [128, 256])
+            analytic = minimum(a / (2σ^2) + log(1 / δ) / (a - 1) for a in alphas)
+            @test ext._rdp_accountant(σ, 1.0, 1, δ) ≈ analytic
+
+            # ε must grow with the sampling rate and the number of steps,
+            # and shrink as noise is added.
+            @test issorted([ext._rdp_accountant(s, 0.01, 1000, δ)
+                            for s in (0.5, 1.0, 2.0, 4.0)]; rev = true)
+            @test issorted([ext._rdp_accountant(1.0, q, 1000, δ)
+                            for q in (0.001, 0.01, 0.1, 0.5)])
+            @test issorted([ext._rdp_accountant(1.0, 0.01, t, δ)
+                            for t in (10, 100, 1000, 10_000)])
+        end
+
+        # REQ-DIF-005: Poisson subsampling produces variable lot sizes, and
+        # an empty lot is a legitimate outcome that must still take a noisy
+        # step.  n=8 with batch_size=1 gives q=0.125, so P(empty) ≈ 0.34 per
+        # step — over 16 steps an empty lot is effectively certain.
+        @testset "Poisson subsampling tolerates empty lots" begin
+            small = (; x = randn(MersenneTwister(7), Float32, 8),
+                       c = rand(MersenneTwister(8), ["a", "b"], 8))
+            model = fit(DiffusionGenerator(; dp = true, epochs = 2,
+                                             batch_size = 1, num_timesteps = 10,
+                                             hidden_dim = 8, n_blocks = 1),
+                        small; privacy = pb, rng = MersenneTwister(42))
+            @test model isa FittedDiffusionModel
+            syn = sample(model, 5)
+            @test length(syn.x) == 5
+            @test all(c -> c ∈ ["a", "b"], syn.c)
+        end
     end
 
     # ════════════════════════════════════════════════════════════════════════

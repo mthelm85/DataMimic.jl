@@ -13,7 +13,7 @@
 #   [Song et al. 2020]         — DDIM (deterministic reverse sampling)
 #   [Hoogeboom et al. 2021]    — Multinomial diffusion
 #   [Abadi et al. 2016]        — DP-SGD
-#   [Mironov et al. 2019]      — Exact subsampled Gaussian RDP accounting
+#   [Mironov et al. 2019]      — RDP of the Poisson-subsampled Gaussian
 
 module DataMimicLuxExt
 
@@ -1062,25 +1062,42 @@ function _logfactorial(n::Int)
 end
 
 """
-Rényi DP accountant: compute (ε, δ)-DP spent after `steps` applications of
-the subsampled Gaussian mechanism with noise multiplier `σ` and sampling
-rate `q`.
+Rényi DP accountant: bound the (ε, δ)-DP spend after `steps` applications of
+the *Poisson-subsampled* Gaussian mechanism with noise multiplier `σ` and
+sampling rate `q` (each record included independently with probability `q`).
 
-Uses the exact RDP bound for integer orders [Mironov et al. 2019]:
+For integer orders α the Rényi divergence of the sampled Gaussian mechanism
+has the closed form [Mironov et al. 2019, Sec. 3.3]:
 
     ε_RDP(α) = (1/(α-1)) log( Σ_{k=0}^{α} C(α,k) (1-q)^{α-k} q^k
                                               exp(k(k-1)/(2σ²)) )
 
-composed over `steps` via addition (RDP composition).  Converts to
-(ε, δ)-DP via:
-    ε = min_α { ε_RDP(α) + log(1/δ) / (α-1) }
+which is exact for that order (it is the dominating direction of the two
+Rényi divergences defining the mechanism's RDP).  The reported ε is
+nonetheless an *upper bound* rather than the tightest achievable value, for
+two reasons:
+
+  1. the order is minimized over a finite grid of integer α only — real
+     orders in between, which can be slightly better, are not searched; and
+  2. the RDP → (ε, δ) conversion below is the standard bound of
+     [Mironov 2017, Prop. 3]; tighter conversions exist
+     [Balle et al. 2020, Canonne et al. 2020].
+
+Both approximations err on the conservative side, so the returned ε is a
+valid (if not minimal) guarantee.  Composition over `steps` is by addition
+of RDP at a common order, and the conversion is
+
+    ε = min_α { steps · ε_RDP(α) + log(1/δ) / (α-1) }
+
+This bound is only valid for **Poisson** subsampling — the caller must
+sample minibatches accordingly (see `_train_dpsgd!`).
 """
 function _rdp_accountant(σ::Float64, q::Float64, steps::Int, delta::Float64)
     alphas = vcat(collect(2:10), collect(12:2:64), [128, 256])
     best_eps = Inf
 
     for α in alphas
-        # Exact RDP for the subsampled Gaussian mechanism at integer α
+        # Closed-form RDP of the Poisson-subsampled Gaussian at integer α
         log_terms = Vector{Float64}(undef, α + 1)
         for k in 0:α
             log_binom = _logfactorial(α) - _logfactorial(k) - _logfactorial(α - k)
@@ -1116,10 +1133,15 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
     l1m_T = Float32(sched.log_1_min_cumprod_alpha[T])
     conditional = !isempty(y_indices)
 
-    # DP-SGD parameters
+    # DP-SGD parameters (REQ-DIF-005)
     C = 1.0                                     # gradient clip norm
-    q = min(batch_size / nrows, 1.0)            # sampling rate
-    total_steps = epochs * ceil(Int, nrows / batch_size)
+    q = min(batch_size / nrows, 1.0)            # Poisson sampling rate
+    # Expected lot size.  Both the gradient average and the noise scale are
+    # normalized by this *constant*, never by the realized batch size — the
+    # latter is data-dependent and would leak.
+    expected_bs = q * nrows
+    steps_per_epoch = ceil(Int, nrows / batch_size)
+    total_steps = epochs * steps_per_epoch
 
     # Binary search for noise multiplier σ that satisfies the budget
     σ_lo, σ_hi = 0.1, 100.0
@@ -1158,11 +1180,24 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
 
         epoch_loss = 0.0
         n_batches  = 0
-        perm = Random.randperm(rng, nrows)
-        for start in 1:batch_size:nrows
-            stop = min(start + batch_size - 1, nrows)
-            idx  = perm[start:stop]
-            bs   = length(idx)
+        # Poisson subsampling (REQ-DIF-005): each record is included in the
+        # lot independently with probability q.  This is exactly the
+        # mechanism `_rdp_accountant` models; shuffle-and-partition over a
+        # random permutation is a *different* mechanism with different
+        # amplification, so it must not be used here.
+        for _step in 1:steps_per_epoch
+            idx = findall(rand(rng, nrows) .< q)
+            bs  = length(idx)
+
+            # An empty lot is a legitimate outcome of Poisson sampling.  It
+            # still consumes a step of budget, so the (all-zero) gradient is
+            # still noised and applied.
+            if bs == 0
+                gs_noisy = _grad_add_noise!(_grad_zero(ps_all),
+                                            σ_noise * C / expected_bs, rng)
+                opt_state, ps_all = Optimisers.update(opt_state, ps_all, gs_noisy)
+                continue
+            end
 
             t_batch = rand(rng, 1:T, bs)
 
@@ -1216,9 +1251,10 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
             epoch_loss += batch_loss / bs
             n_batches  += 1
 
-            # Average and add noise
-            gs_avg = _grad_scale(gs_sum, 1.0 / bs)
-            noise_scale = σ_noise * C / bs
+            # Normalize by the *expected* lot size (not the realized one) and
+            # add Gaussian noise calibrated to the clip norm C.
+            gs_avg = _grad_scale(gs_sum, 1.0 / expected_bs)
+            noise_scale = σ_noise * C / expected_bs
             gs_noisy = _grad_add_noise!(gs_avg, noise_scale, rng)
 
             opt_state, ps_all = Optimisers.update(opt_state, ps_all, gs_noisy)
