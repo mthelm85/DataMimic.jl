@@ -661,6 +661,36 @@ using Lux, Zygote
             @test all(v -> v ∈ ["x", "y", "z"], syn.a)
         end
 
+        # REQ-DPC-002: Analyze-Gauss requires a *symmetric* noise matrix whose
+        # entries each carry the calibrated variance.  Building it as
+        # (E + E')/2 from independent draws is the natural-looking mistake: it
+        # leaves the diagonal at σ² but halves every off-diagonal to σ²/2,
+        # under-noising them by √2 and breaking the privacy calibration.
+        @testset "Analyze-Gauss noise is symmetric with uniform variance" begin
+            d, reps, σ = 4, 4000, 2.0
+            rng_noise = MersenneTwister(7)
+            draw_E() = DataMimic._symmetric_gaussian_noise(d, σ, rng_noise)
+
+            @test all(E == E' for E in (draw_E() for _ in 1:20))
+
+            diag_draws = Float64[]
+            off_draws  = Float64[]
+            for _ in 1:reps
+                E = draw_E()
+                push!(diag_draws, E[1, 1])
+                push!(off_draws,  E[1, 2])
+            end
+
+            # Both must have variance σ², not σ²/2 for the off-diagonal.
+            svar = DataMimic.StatsBase.var
+            @test isapprox(svar(diag_draws), σ^2; rtol = 0.1)
+            @test isapprox(svar(off_draws),  σ^2; rtol = 0.1)
+
+            # Guard against the averaging bug specifically: it would land the
+            # off-diagonal variance near σ²/2.
+            @test !isapprox(svar(off_draws), σ^2 / 2; rtol = 0.1)
+        end
+
         @testset "reproducibility" begin
             m1 = fit(DPCopulaGenerator(), tbl; privacy = pb,
                      rng = MersenneTwister(1))

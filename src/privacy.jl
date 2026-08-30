@@ -42,6 +42,26 @@ function _exponential_mechanism(scores::Vector{Float64}, epsilon::Float64,
 end
 
 """
+Draw a `d × d` symmetric Gaussian noise matrix whose every entry — diagonal
+and off-diagonal alike — has standard deviation `sigma`.
+
+The upper triangle (including the diagonal) is drawn iid and mirrored into the
+lower triangle.  Do *not* build this as `(E + E')/2` from an unstructured draw:
+that leaves the diagonal at `sigma²` but halves every off-diagonal to
+`sigma²/2`, under-noising them by √2 and breaking the calibration of any
+mechanism relying on it (e.g. Analyze-Gauss, [Dwork et al. 2014]).
+"""
+function _symmetric_gaussian_noise(d::Int, sigma::Float64, rng::AbstractRNG)
+    E = Matrix{Float64}(undef, d, d)
+    for i in 1:d, j in i:d
+        e = randn(rng) * sigma
+        E[i, j] = e
+        E[j, i] = e
+    end
+    return E
+end
+
+"""
 Project a symmetric matrix to the nearest positive semi-definite matrix
 by clamping eigenvalues below `min_eig`.
 """
