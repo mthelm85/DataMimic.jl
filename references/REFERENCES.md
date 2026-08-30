@@ -130,14 +130,14 @@ Papers and methods underpinning each engine and evaluation module.
   MST algorithm: exponential-mechanism marginal selection → Gaussian-noise
   measurement → PGM reconstruction.
 
-  `MSTGenerator` implements a **simplified tree-structured variant** of this:
-  exponential-mechanism spanning-tree selection, Gaussian-noise measurement of
-  the root 1-way marginal and the tree's 2-way marginals, then ancestral
-  sampling from row-normalized conditionals. It does **not** run PGM inference
-  and does not measure all 1-way marginals. See the divergence note under
-  REQ-MST-007 in REQUIREMENTS.md, and the reference implementation at
+  Implemented by `MSTGenerator`: all 1-way marginals measured, spanning-tree
+  selection by exponential mechanism scored on count-scale L1 error against the
+  independence reference, Gaussian-noise measurement of the selected 2-way
+  marginals, then Private-PGM reconciliation before ancestral sampling.
+  Cross-checked against the reference implementation at
   [ryan112358/private-pgm](https://github.com/ryan112358/private-pgm)
-  (`mechanisms/mst.py`).
+  (`mechanisms/mst.py`). Domain compression is the one remaining gap; see the
+  note under REQ-MST-007 in REQUIREMENTS.md.
 
 ### Private Graphical Models
 
@@ -146,9 +146,11 @@ Papers and methods underpinning each engine and evaluation module.
   ICML 2019.
 
   The PGM inference engine that MST uses to reconcile noisy marginal
-  measurements into a consistent joint distribution. **Not currently
-  implemented in DataMimic** — listed here as the reference for what
-  `MSTGenerator` would need in order to match the published algorithm.
+  measurements into a consistent joint distribution. Implemented in
+  `src/engines/mst.jl` as entropic mirror descent over the marginal polytope,
+  with exact sum-product belief propagation for the inference step — the model
+  is a spanning tree, so two passes suffice and no general junction-tree
+  machinery is required.
 
 ---
 

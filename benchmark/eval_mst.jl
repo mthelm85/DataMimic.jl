@@ -36,9 +36,30 @@
 # random draw: extra budget bought nothing.  The eps = 0.5 rows differ by less
 # than one seed-standard-deviation and should not be read as a regression.
 #
-# A Private-PGM reconciliation prototype (dev/mst-pgm-wip.patch) improved
-# fidelity further but dropped TSTR to ~0.68; it was built on top of the old
-# random-selection behaviour and is worth re-testing now that selection works.
+# Private-PGM reconciliation, measured over 6 seeds per cell on top of the
+# count-scale selection (mean +/- sd):
+#
+#     eps   PGM   fidelity            TSTR ratio
+#     0.5   off   0.1513 +/- 0.0100   0.7272 +/- 0.0644
+#     0.5   on    0.1089 +/- 0.0016   0.7638 +/- 0.0291
+#     1.0   off   0.1224 +/- 0.0017   0.7705 +/- 0.0355
+#     1.0   on    0.1077 +/- 0.0007   0.7846 +/- 0.0485
+#     2.0   off   0.1124 +/- 0.0012   0.8120 +/- 0.0203
+#     2.0   on    0.1079 +/- 0.0009   0.8169 +/- 0.0214
+#     4.0   off   0.1078 +/- 0.0009   0.8137 +/- 0.0146
+#     4.0   on    0.1077 +/- 0.0008   0.8137 +/- 0.0226
+#     8.0   off   0.1057 +/- 0.0005   0.8101 +/- 0.0180
+#     8.0   on    0.1077 +/- 0.0008   0.8122 +/- 0.0159
+#
+# The benefit scales inversely with the budget, as a variance-reduction step
+# should.  At eps = 8 fidelity is marginally worse with reconciliation: with
+# near-exact measurements the binding constraint is tree-model misspecification
+# rather than noise.
+#
+# An earlier version of the same estimation code regressed TSTR by ~0.10 and
+# was rejected.  That was measured against random tree selection; once
+# selection responded to the budget the regression disappeared entirely.
+# Reconciliation cannot help when the tree it propagates over is arbitrary.
 
 using Pkg
 Pkg.activate("benchmark")

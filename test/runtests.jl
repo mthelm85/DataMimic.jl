@@ -564,6 +564,70 @@ using Lux, Zygote
             @test model isa FittedMSTModel
         end
 
+        # REQ-MST-005: belief propagation on the selected tree must be exact.
+        # Checked against brute-force enumeration of the full joint, which is
+        # feasible here because the state space is tiny (2*3*2 = 12 states).
+        @testset "belief propagation is exact vs brute force" begin
+            n_bins = [2, 3, 2]
+            edges  = [(1, 2), (2, 3)]          # path 1 — 2 — 3, rooted at 1
+            nbrs   = [[2], [1, 3], [2]]
+            rng_bp = MersenneTwister(4)
+
+            θ_node = [randn(rng_bp, k) for k in n_bins]
+            θ_edge = Dict{Tuple{Int,Int}, Matrix{Float64}}(
+                (1, 2) => randn(rng_bp, 2, 3),
+                (2, 3) => randn(rng_bp, 3, 2))
+
+            joint = zeros(n_bins...)
+            for a in 1:2, b in 1:3, c in 1:2
+                joint[a, b, c] = exp(θ_node[1][a] + θ_node[2][b] + θ_node[3][c] +
+                                     θ_edge[(1, 2)][a, b] + θ_edge[(2, 3)][b, c])
+            end
+            joint ./= sum(joint)
+
+            μ_node, μ_edge = DataMimic._tree_bp(edges, nbrs, 1, n_bins,
+                                                θ_node, θ_edge)
+
+            @test μ_node[1] ≈ vec(sum(joint, dims = (2, 3)))
+            @test μ_node[2] ≈ vec(sum(joint, dims = (1, 3)))
+            @test μ_node[3] ≈ vec(sum(joint, dims = (1, 2)))
+            @test μ_edge[(1, 2)] ≈ dropdims(sum(joint, dims = 3), dims = 3)
+            @test μ_edge[(2, 3)] ≈ dropdims(sum(joint, dims = 1), dims = 1)
+
+            @test all(isapprox(sum(m), 1.0) for m in μ_node)
+            @test vec(sum(μ_edge[(1, 2)], dims = 1)) ≈ μ_node[2]
+            @test vec(sum(μ_edge[(2, 3)], dims = 2)) ≈ μ_node[2]
+        end
+
+        # The estimation step exists to reconcile inconsistent measurements:
+        # given consistent targets it should recover them, and given
+        # inconsistent ones it must still return mutually consistent marginals.
+        @testset "mirror descent reconciles noisy marginals" begin
+            n_bins = [3, 2]
+            edges  = [(1, 2)]
+            nbrs   = [[2], [1]]
+
+            truth = [0.30 0.10;
+                     0.05 0.25;
+                     0.20 0.10]
+            y_node = [vec(sum(truth, dims = 2)), vec(sum(truth, dims = 1))]
+            y_edge = Dict{Tuple{Int,Int}, Matrix{Float64}}((1, 2) => truth)
+
+            μn, μe = DataMimic._fit_tree_mrf(edges, nbrs, 1, n_bins,
+                                             y_node, y_edge; iters = 400)
+            @test μe[(1, 2)] ≈ truth atol = 1e-3
+            @test μn[1] ≈ y_node[1] atol = 1e-3
+
+            # Perturb the 1-way target so it disagrees with the 2-way one; the
+            # fit must still return consistent marginals.
+            bad_node = [[0.6, 0.2, 0.2], y_node[2]]
+            μn2, μe2 = DataMimic._fit_tree_mrf(edges, nbrs, 1, n_bins,
+                                               bad_node, y_edge; iters = 400)
+            @test vec(sum(μe2[(1, 2)], dims = 2)) ≈ μn2[1] atol = 1e-8
+            @test vec(sum(μe2[(1, 2)], dims = 1)) ≈ μn2[2] atol = 1e-8
+            @test isapprox(sum(μe2[(1, 2)]), 1.0; atol = 1e-8)
+        end
+
         @testset "reproducibility" begin
             m1 = fit(MSTGenerator(), tbl; privacy = pb, rng = MersenneTwister(1))
             m2 = fit(MSTGenerator(), tbl; privacy = pb, rng = MersenneTwister(1))

@@ -182,6 +182,163 @@ function _select_mst_tree(disc_data::Vector{Vector{Int}},
     return tree_edges, root
 end
 
+# ─── Private-PGM estimation on the selected tree ─────────────────────────
+
+"""Numerically stable log-sum-exp over a vector."""
+function _lse(xs::AbstractVector{Float64})
+    m = maximum(xs)
+    isfinite(m) || return m
+    return m + log(sum(exp(x - m) for x in xs))
+end
+
+"""
+Exact sum-product belief propagation for a tree-structured Markov random field
+
+    p(x) ∝ exp( Σᵢ θᵢ(xᵢ) + Σ₍ᵢⱼ₎ θᵢⱼ(xᵢ, xⱼ) )
+
+Because selection produces a *spanning tree*, the model is a tree and inference
+is exact in two passes (leaves→root, root→leaves) — no junction-tree machinery
+over general cliques is required.  Returns node and edge marginals, each
+normalized to sum to 1.  All work is in log space.
+"""
+function _tree_bp(edges::Vector{Tuple{Int,Int}}, nbrs::Vector{Vector{Int}},
+                  root::Int, n_bins::Vector{Int},
+                  θ_node::Vector{Vector{Float64}},
+                  θ_edge::Dict{Tuple{Int,Int}, Matrix{Float64}})
+    d = length(n_bins)
+
+    order  = [root]
+    parent = zeros(Int, d)
+    seen   = falses(d); seen[root] = true
+    qi = 1
+    while qi <= length(order)
+        u = order[qi]; qi += 1
+        for v in nbrs[u]
+            if !seen[v]
+                seen[v] = true
+                parent[v] = u
+                push!(order, v)
+            end
+        end
+    end
+
+    logm = Dict{Tuple{Int,Int}, Vector{Float64}}()
+    pot(p, c) = haskey(θ_edge, (p, c)) ? θ_edge[(p, c)] : permutedims(θ_edge[(c, p)])
+
+    # Upward: children → parents
+    for idx in length(order):-1:2
+        c = order[idx]; p = parent[c]
+        belief_c = copy(θ_node[c])
+        for g in nbrs[c]
+            g == p && continue
+            belief_c .+= logm[(g, c)]
+        end
+        E = pot(p, c)
+        logm[(c, p)] = [_lse(vec(E[xp, :]) .+ belief_c) for xp in 1:n_bins[p]]
+    end
+
+    # Downward: parents → children
+    for u in order
+        for c in nbrs[u]
+            c == parent[u] && continue
+            belief_u = copy(θ_node[u])
+            for k in nbrs[u]
+                k == c && continue
+                belief_u .+= logm[(k, u)]
+            end
+            E = pot(u, c)
+            logm[(u, c)] = [_lse(vec(E[:, xc]) .+ belief_u) for xc in 1:n_bins[c]]
+        end
+    end
+
+    μ_node = Vector{Vector{Float64}}(undef, d)
+    for i in 1:d
+        lb = copy(θ_node[i])
+        for k in nbrs[i]
+            lb .+= logm[(k, i)]
+        end
+        lb .-= _lse(lb)
+        μ_node[i] = exp.(lb)
+    end
+
+    μ_edge = Dict{Tuple{Int,Int}, Matrix{Float64}}()
+    for (p, c) in edges
+        up = copy(θ_node[p]); for k in nbrs[p]; k == c && continue; up .+= logm[(k, p)]; end
+        uc = copy(θ_node[c]); for k in nbrs[c]; k == p && continue; uc .+= logm[(k, c)]; end
+        E = pot(p, c)
+        lb = Matrix{Float64}(undef, n_bins[p], n_bins[c])
+        for xp in 1:n_bins[p], xc in 1:n_bins[c]
+            lb[xp, xc] = up[xp] + uc[xc] + E[xp, xc]
+        end
+        lb .-= _lse(vec(lb))
+        μ_edge[(p, c)] = exp.(lb)
+    end
+
+    return μ_node, μ_edge
+end
+
+"""
+Fit a tree-structured MRF to the noisy measurements [McKenna et al. 2019].
+
+Minimizes `Σ‖μ − y‖²` over the marginal polytope by entropic mirror descent:
+each iteration computes the model's marginals by belief propagation, takes the
+gradient of the loss with respect to them, and subtracts it from the
+potentials.  Because θ ↦ μ is the gradient of the log-partition function, that
+update *is* mirror descent under the entropy mirror map.
+
+This is what makes the measurements mutually consistent; without it the 2-way
+counts are merely row-normalized and the 1-way measurements are discarded.
+
+Targets are on the probability scale and deliberately not clamped: noise can
+push a cell below zero, and least squares against the raw value is unbiased
+where clamping is not.  The fitted marginals are valid probabilities by
+construction.  Estimation is post-processing of already-private measurements
+and consumes no additional privacy budget.
+"""
+function _fit_tree_mrf(edges::Vector{Tuple{Int,Int}}, nbrs::Vector{Vector{Int}},
+                       root::Int, n_bins::Vector{Int},
+                       y_node::Vector{Vector{Float64}},
+                       y_edge::Dict{Tuple{Int,Int}, Matrix{Float64}};
+                       iters::Int = 250, lr::Float64 = 1.0)
+    d = length(n_bins)
+    θ_node = [zeros(n_bins[i]) for i in 1:d]
+    θ_edge = Dict{Tuple{Int,Int}, Matrix{Float64}}(
+        e => zeros(n_bins[e[1]], n_bins[e[2]]) for e in edges)
+
+    objective(mn, me) =
+        sum(sum(abs2, mn[i] .- y_node[i]) for i in 1:d) +
+        sum(sum(abs2, me[e] .- y_edge[e]) for e in edges; init = 0.0)
+
+    μ_node, μ_edge = _tree_bp(edges, nbrs, root, n_bins, θ_node, θ_edge)
+    loss = objective(μ_node, μ_edge)
+
+    step = lr
+    for _ in 1:iters
+        g_node = [2.0 .* (μ_node[i] .- y_node[i]) for i in 1:d]
+        g_edge = Dict{Tuple{Int,Int}, Matrix{Float64}}(
+            e => 2.0 .* (μ_edge[e] .- y_edge[e]) for e in edges)
+
+        accepted = false
+        for _ in 1:40
+            θn = [θ_node[i] .- step .* g_node[i] for i in 1:d]
+            θe = Dict{Tuple{Int,Int}, Matrix{Float64}}(
+                e => θ_edge[e] .- step .* g_edge[e] for e in edges)
+            mn, me = _tree_bp(edges, nbrs, root, n_bins, θn, θe)
+            l = objective(mn, me)
+            if l < loss
+                θ_node, θ_edge, μ_node, μ_edge, loss = θn, θe, mn, me, l
+                accepted = true
+                break
+            end
+            step /= 2
+        end
+        accepted || break
+        step *= 1.5
+    end
+
+    return μ_node, μ_edge
+end
+
 # ─── Noisy measurement + conditional construction ────────────────────────
 
 """
@@ -191,38 +348,69 @@ with Gaussian noise (ρ-zCDP per measurement).  Returns
 """
 function _measure_mst(disc_data::Vector{Vector{Int}}, n_bins::Vector{Int},
                       tree_edges::Vector{Tuple{Int,Int}}, root::Int,
-                      rho_per::Float64, nrows::Int, rng::AbstractRNG)
-    # ── Root 1-way marginal ──
-    root_col = disc_data[root]
-    kr = n_bins[root]
-    counts = zeros(kr)
-    for v in root_col
-        v > 0 && (counts[v] += 1.0)
-    end
+                      oneway_noisy::Vector{Vector{Float64}},
+                      rho_per::Float64, nrows::Int, rng::AbstractRNG;
+                      reconcile::Bool = true)
+    d = length(disc_data)
     sigma = _rho_to_sigma(rho_per, 1.0)
-    counts .+= randn(rng, kr) .* sigma
-    counts .= max.(counts, 0.0)
-    s = sum(counts)
-    root_marginal = s > 0 ? counts / s : fill(1.0 / kr, kr)
 
-    # ── 2-way marginals → P(child | parent) ──
-    conditionals = Dict{Tuple{Int,Int}, Matrix{Float64}}()
+    # ── 2-way marginals on the selected edges ──
+    raw2 = Dict{Tuple{Int,Int}, Matrix{Float64}}()
     for (parent, child) in tree_edges
         col_p, col_c = disc_data[parent], disc_data[child]
         kp, kc = n_bins[parent], n_bins[child]
-
         ct = zeros(kp, kc)
         for r in 1:nrows
             @inbounds a, b = col_p[r], col_c[r]
-            if a > 0 && b > 0
-                ct[a, b] += 1.0
-            end
+            (a > 0 && b > 0) && (ct[a, b] += 1.0)
         end
+        ct .+= randn(rng, kp, kc) .* sigma
+        raw2[(parent, child)] = ct
+    end
 
-        sig = _rho_to_sigma(rho_per, 1.0)
-        ct .+= randn(rng, kp, kc) .* sig
-        ct .= max.(ct, 0.0)
+    if reconcile && !isempty(tree_edges)
+        # ── Private-PGM: reconcile the 1-way and 2-way measurements ──
+        nbrs = [Int[] for _ in 1:d]
+        for (p, c) in tree_edges
+            push!(nbrs[p], c)
+            push!(nbrs[c], p)
+        end
+        n = max(nrows, 1)
+        y_node = [v ./ n for v in oneway_noisy]
+        y_edge = Dict{Tuple{Int,Int}, Matrix{Float64}}(
+            e => m ./ n for (e, m) in raw2)
 
+        μ_node, μ_edge = _fit_tree_mrf(tree_edges, nbrs, root, n_bins,
+                                       y_node, y_edge)
+
+        rm = copy(μ_node[root])
+        s = sum(rm)
+        root_marginal = s > 0 ? rm ./ s : fill(1.0 / length(rm), length(rm))
+
+        conditionals = Dict{Tuple{Int,Int}, Matrix{Float64}}()
+        for (p, c) in tree_edges
+            joint = μ_edge[(p, c)]
+            kp, kc = size(joint)
+            cond = Matrix{Float64}(undef, kp, kc)
+            for i in 1:kp
+                r = sum(@view joint[i, :])
+                cond[i, :] = r > 0 ? joint[i, :] ./ r : fill(1.0 / kc, kc)
+            end
+            conditionals[(p, c)] = cond
+        end
+        return root_marginal, conditionals
+    end
+
+    # ── Unreconciled: clamp and row-normalize each measurement on its own ──
+    kr = n_bins[root]
+    counts = max.(oneway_noisy[root], 0.0)
+    s = sum(counts)
+    root_marginal = s > 0 ? counts / s : fill(1.0 / kr, kr)
+
+    conditionals = Dict{Tuple{Int,Int}, Matrix{Float64}}()
+    for (parent, child) in tree_edges
+        ct = max.(raw2[(parent, child)], 0.0)
+        kp, kc = size(ct)
         cond = similar(ct)
         for i in 1:kp
             rs = sum(@view ct[i, :])
@@ -230,7 +418,6 @@ function _measure_mst(disc_data::Vector{Vector{Int}}, n_bins::Vector{Int},
         end
         conditionals[(parent, child)] = cond
     end
-
     return root_marginal, conditionals
 end
 
@@ -384,7 +571,7 @@ function _fit_engine(gen::MSTGenerator, cols, col_names, id_set, fill_dict,
 
     # ── Noisy measurement ───────────────────────────────────────────────
     root_marginal, conditionals = _measure_mst(disc_data_vecs, bins_per_col,
-                                                tree_edges, root,
+                                                tree_edges, root, oneway_noisy,
                                                 rho_per, nrows, rng)
 
     id_cols = [name for name in col_names if name in id_set]

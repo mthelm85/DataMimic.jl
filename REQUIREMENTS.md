@@ -188,31 +188,24 @@ a later phase.
 | **REQ-MST-002** | `MSTGenerator` shall select a spanning tree over columns via the exponential mechanism \[McKenna et al. 2021\]. | Done | 2 |
 | **REQ-MST-003** | `MSTGenerator` shall measure selected marginals with calibrated Gaussian noise satisfying (ε,δ)-DP via zCDP composition \[Bun & Steinke 2016\]. | Done | 2 |
 | **REQ-MST-004** | `MSTGenerator` shall construct a spanning tree over columns and store it as parent→child edges. | Done | 2 |
-| **REQ-MST-005** | `MSTGenerator` shall estimate the joint distribution as a tree-structured factorization — a noisy root marginal plus noisy `P(child \| parent)` conditionals — sampled ancestrally. | Done | 2 |
+| **REQ-MST-005** | `MSTGenerator` shall estimate the joint distribution by fitting a tree-structured Markov random field to all noisy measurements — every 1-way marginal and the selected 2-way marginals — via entropic mirror descent with exact sum-product belief propagation \[McKenna et al. 2019\], then sample ancestrally from the reconciled conditionals. Estimation is post-processing and consumes no privacy budget. | Done | 2 |
 | **REQ-MST-006** | `MSTGenerator` shall un-discretize continuous columns when sampling synthetic rows. | Done | 2 |
 | **REQ-MST-007** | `MSTGenerator` shall accept `max_marginal_order ∈ {2, 3}`; 3-way marginals are **not implemented** and fall back to 2-way with a warning. | Partial | 2 |
 
-> **Divergence from \[McKenna et al. 2021\].**  `MSTGenerator` implements a
-> *simplified tree-structured variant* of MST, not the published algorithm.
-> Checked against the reference implementation (`ryan112358/private-pgm`,
-> `mechanisms/mst.py`), the differences are:
+> **Relationship to \[McKenna et al. 2021\].**  Checked against the reference
+> implementation (`ryan112358/private-pgm`, `mechanisms/mst.py`).  All *d* 1-way
+> marginals are measured, candidate edges are scored by count-scale L1 error
+> against the independence reference, and the measurements are reconciled by
+> Private-PGM before sampling.
 >
-> 1. **No PGM inference.** The reference reconciles all noisy measurements with
->    Private-PGM (Mirror Descent) \[McKenna et al. 2019\]; this engine
->    row-normalizes the noisy 2-way counts into conditionals directly.  The tree
->    factorization is exact, but the measurements are never made mutually
->    consistent.
-> 2. **Only the root 1-way marginal is measured.** The reference measures all
->    *d* 1-way marginals and supplies them to PGM alongside the 2-way ones.
-> 3. **Selection score is mutual information** on the raw data; the reference
->    scores candidate edges by the L1 error between the true 2-way marginal and
->    PGM's current estimate.  Note the exponential mechanism is invoked with
->    `sensitivity = 1.0`, which is correct for the reference's L1 score but is
->    **not derived** for mutual information.
-> 4. **No domain compression.** The reference merges bins below `3σ` into a
->    single "other" category before selection.
-> 5. **Budget split** is ½ selection / ½ measurement, against the reference's
->    ⅓ selection / ⅓ 1-way / ⅓ 2-way.  Both are valid zCDP compositions.
+> **Remaining difference: no domain compression.**  The reference merges bins
+> whose noisy count falls below `3σ` into a single "other" category before
+> selection, which matters on sparse categorical domains.  Not implemented here.
+>
+> The budget split is 30% selection / 20% 1-way / 50% 2-way, against the
+> reference's ⅓ / ⅓ / ⅓.  The 1-way marginals serve mainly to anchor the
+> selection score, so they take the smaller share; both are valid zCDP
+> compositions.
 >
 > **Fixed — selection used to be effectively random.**  The exponential
 > mechanism weights candidates by `exp(ε·q/(2Δ))`, so its ability to
@@ -230,13 +223,27 @@ a later phase.
 > at ≈0.79: extra budget had been buying nothing.  See `benchmark/eval_mst.jl`
 > for before/after tables and for the seed-variance caveat at low ε.
 >
-> Still outstanding: PGM reconciliation and domain compression.  A prototype of
-> the former (belief propagation + entropic mirror descent, BP verified exact
-> against brute-force enumeration) improved marginal fidelity but dropped TSTR
-> to ≈0.68.  It was built on top of the old random-selection behaviour, so it
-> is worth re-testing now that selection works — reconciliation cannot help
-> when the tree it propagates over is arbitrary.  Preserved at
-> `dev/mst-pgm-wip.patch`.
+> **PGM reconciliation now lands, because selection was fixed first.**  An
+> earlier prototype of the same estimation code regressed TSTR by ≈0.10 and was
+> rejected; re-tested on top of count-scale selection over 6 seeds per cell, the
+> regression is gone entirely and it helps where noise dominates:
+>
+> | ε | fidelity off → on | TSTR off → on |
+> |---|---|---|
+> | 0.5 | 0.1513 → **0.1089** | 0.727 → **0.764** |
+> | 1.0 | 0.1224 → **0.1077** | 0.771 → 0.785 |
+> | 2.0 | 0.1124 → **0.1079** | 0.812 → 0.817 |
+> | 4.0 | 0.1078 → 0.1077 | 0.814 → 0.814 |
+> | 8.0 | **0.1057** → 0.1077 | 0.810 → 0.812 |
+>
+> The benefit scales inversely with the budget, as a variance-reduction step
+> should: large at ε = 0.5 (fidelity 28% better, and the TSTR seed-standard-
+> deviation halves from 0.064 to 0.029), negligible by ε = 4.  At ε = 8 fidelity
+> is marginally *worse* (0.1057 vs 0.1077) — with near-exact measurements the
+> binding constraint is tree-model misspecification rather than noise, so
+> forcing the measurements onto the tree adds bias where raw conditionals were
+> already fine.  Accepted: the regime that matters for a DP mechanism is the
+> noisy one.
 
 ---
 
