@@ -1137,6 +1137,46 @@ using Lux, Zygote
                 @test_throws ArgumentError fidelity_score(real_tbl, other)
             end
 
+            # REQ-EVL-003: a zero-variance column has no rank spread, so every
+            # Spearman correlation involving it is 0/0.  Left unhandled, one
+            # such column turns the correlation matrix — and through it the
+            # headline aggregate — into NaN, even though each per-column score
+            # computed fine.  Constant columns are common in real tables, so a
+            # silent NaN here is a wrong answer rather than an edge case.
+            @testset "constant column does not poison the score" begin
+                n = 200
+                rng_c = MersenneTwister(11)
+                r = (; a = randn(rng_c, n), b = randn(rng_c, n), c = fill(1.0, n))
+                s = (; a = randn(rng_c, n), b = randn(rng_c, n), c = fill(1.0, n))
+
+                fs = fidelity_score(r, s)
+                @test !isnan(fs.aggregate)
+                @test !isnan(fs.correlation_score)
+
+                # The constant column is still scored on its own …
+                @test haskey(fs.column_scores, :c)
+                @test fs.column_scores[:c] ≈ 0.0 atol = 1e-10
+                # … and only dropped from the correlation term.
+                @test :c in fs.correlation_excluded
+                @test Set(fs.correlation_columns) == Set([:a, :b])
+
+                # An all-constant table leaves nothing to correlate, which must
+                # degrade gracefully to the 1-D mean rather than to NaN.
+                r2 = (; a = fill(2.0, n), b = fill(5.0, n))
+                fs2 = fidelity_score(r2, r2)
+                @test !isnan(fs2.aggregate)
+                @test fs2.correlation_score == 0.0
+                @test isempty(fs2.correlation_columns)
+
+                # A column constant in only one of the two tables also counts
+                # as degenerate — the ranks are undefined on that side.
+                r3 = (; a = randn(rng_c, n), b = randn(rng_c, n))
+                s3 = (; a = randn(rng_c, n), b = fill(3.0, n))
+                fs3 = fidelity_score(r3, s3)
+                @test !isnan(fs3.aggregate)
+                @test :b in fs3.correlation_excluded
+            end
+
             @testset "non-table → error" begin
                 @test_throws ArgumentError fidelity_score("bad", synth_tbl)
                 @test_throws ArgumentError fidelity_score(real_tbl, "bad")

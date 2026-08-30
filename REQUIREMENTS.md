@@ -289,7 +289,7 @@ a later phase.
 |----|-------------|--------|-------|
 | **REQ-EVL-001** | `fidelity_score(real, synth)` shall compute per-column Kolmogorov–Smirnov statistics for continuous columns. | Done | 4 |
 | **REQ-EVL-002** | `fidelity_score(real, synth)` shall compute per-column Total Variation Distance for categorical columns. | Done | 4 |
-| **REQ-EVL-003** | `fidelity_score(real, synth)` shall compute the Frobenius norm of the difference between real and synthetic pairwise Spearman correlation matrices. | Done | 4 |
+| **REQ-EVL-003** | `fidelity_score(real, synth)` shall compute the Frobenius norm of the difference between real and synthetic pairwise Spearman correlation matrices, excluding numeric columns with fewer than two distinct finite values in either table (their ranks are constant, so every correlation involving them is `0/0`). Excluded columns are still scored individually and are reported in `correlation_excluded`. | Done | 4 |
 | **REQ-EVL-004** | `fidelity_score` shall return a `NamedTuple` containing per-column scores, a 2D correlation score, and a weighted aggregate. | Done | 4 |
 | **REQ-EVL-005** | `privacy_dcr(real, synth)` shall compute the Distance to Closest Record for every synthetic row. | Done | 4 |
 | **REQ-EVL-006** | `privacy_dcr` shall return a `NamedTuple` containing the DCR vector, its median, its 5th-percentile, and a count of exact matches (DCR = 0). | Done | 4 |
