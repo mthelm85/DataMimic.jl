@@ -1099,6 +1099,25 @@ using Lux, Zygote
                 tbl; privacy = pb, rng = MersenneTwister(42))
         end
 
+        # A diverged run used to report loss=NaN and keep going: gradients
+        # NaN, every weight NaN, remaining epochs wasted, and nothing surfaced
+        # until sampling failed much later with an unrelated-looking error.
+        @testset "training aborts on non-finite loss" begin
+            ext = Base.get_extension(DataMimic, :DataMimicLuxExt)
+            @test ext._check_finite_loss(1.5, 3, 100, 0.001) === nothing
+            for bad in (NaN, Inf, -Inf)
+                err = try
+                    ext._check_finite_loss(bad, 7, 100, 0.002); nothing
+                catch e
+                    sprint(showerror, e)
+                end
+                @test err !== nothing
+                @test occursin("diverged", err)
+                @test occursin("epoch 7", err)   # names where it happened
+                @test occursin("lr", err) || occursin("learning rate", err)
+            end
+        end
+
         # REQ-DIF-006: the accountant models the *Poisson*-subsampled
         # Gaussian mechanism.  At q = 1 that degenerates to the plain
         # Gaussian mechanism, whose RDP is exactly α/(2σ²) — a closed form

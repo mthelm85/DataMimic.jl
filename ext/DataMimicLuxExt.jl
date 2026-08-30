@@ -931,6 +931,25 @@ function _ema_update!(target, source, rate::Float32)
     return target
 end
 
+"""
+Abort training when the loss stops being finite.
+
+A diverged run reports `loss=NaN` and otherwise proceeds normally: gradients
+are NaN, every weight becomes NaN, and the remaining epochs are wasted on a
+model that is already dead.  Nothing surfaces until sampling fails much later,
+by which point the cause is far away from the symptom.  Failing here instead
+names the epoch it happened and what usually causes it.
+"""
+function _check_finite_loss(loss, epoch::Int, epochs::Int, lr)
+    isfinite(loss) && return nothing
+    error("DiffusionGenerator training diverged: loss became " *
+          "$(isnan(loss) ? "NaN" : "Inf") at epoch $epoch of $epochs " *
+          "(learning rate $(round(lr; sigdigits = 3))). Every weight is now " *
+          "non-finite, so the remaining epochs cannot recover. Try a lower " *
+          "`lr`, a smaller `batch_size`, fewer `num_timesteps`, or a narrower " *
+          "`d_layers`.")
+end
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 10. Standard Training Loop
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1037,9 +1056,11 @@ function _train_standard!(backbone, emb_layer, ps_bb, ps_emb,
             use_ema && _ema_update!(ps_ema, ps_all, ema_rate)
         end
 
+        avg_loss = epoch_loss / max(n_batches, 1)
+        _check_finite_loss(avg_loss, epoch, epochs, cur_lr)
+
         # Progress report
         if epoch == 1 || epoch % report_every == 0 || epoch == epochs
-            avg_loss = epoch_loss / max(n_batches, 1)
             elapsed  = time() - t_start
             eta      = elapsed / epoch * (epochs - epoch)
             @info "Epoch $(epoch)/$(epochs)  loss=$(round(avg_loss; digits=4))  lr=$(round(cur_lr; sigdigits=3))  elapsed=$(round(Int, elapsed))s  ETA=$(round(Int, eta))s"
@@ -1266,9 +1287,11 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
             opt_state, ps_all = Optimisers.update(opt_state, ps_all, gs_noisy)
         end
 
+        avg_loss = epoch_loss / max(n_batches, 1)
+        _check_finite_loss(avg_loss, epoch, epochs, cur_lr)
+
         # Progress report
         if epoch == 1 || epoch % report_every == 0 || epoch == epochs
-            avg_loss = epoch_loss / max(n_batches, 1)
             elapsed  = time() - t_start
             eta      = elapsed / epoch * (epochs - epoch)
             @info "DP-SGD Epoch $(epoch)/$(epochs)  loss=$(round(avg_loss; digits=4))  lr=$(round(cur_lr; sigdigits=3))  elapsed=$(round(Int, elapsed))s  ETA=$(round(Int, eta))s"
