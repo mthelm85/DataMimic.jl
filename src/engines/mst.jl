@@ -58,36 +58,6 @@ function _discretize_column(nm::Vector, kind::Symbol, T::Type, n_bins::Int;
     return info, bin_idx
 end
 
-# ─── Mutual information ───────────────────────────────────────────────────
-
-"""Mutual information between two discretized columns (pairwise-complete cases)."""
-function _mutual_info(col_i::Vector{Int}, col_j::Vector{Int},
-                      k_i::Int, k_j::Int, nrows::Int)
-    ct = zeros(k_i, k_j)
-    nc = 0
-    for r in 1:nrows
-        @inbounds a, b = col_i[r], col_j[r]
-        if a > 0 && b > 0
-            ct[a, b] += 1.0
-            nc += 1
-        end
-    end
-    nc == 0 && return 0.0
-
-    P  = ct / nc
-    pi = vec(sum(P, dims = 2))
-    pj = vec(sum(P, dims = 1))
-
-    mi = 0.0
-    for a in 1:k_i, b in 1:k_j
-        pab = P[a, b]
-        if pab > 0 && pi[a] > 0 && pj[b] > 0
-            mi += pab * log(pab / (pi[a] * pj[b]))
-        end
-    end
-    return mi
-end
-
 # ─── Noisy 1-way measurement ─────────────────────────────────────────────
 
 """Noisy 1-way count vector for a discretized column (0 = missing)."""

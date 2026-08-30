@@ -106,6 +106,8 @@ function fit(gen::AutoGenerator, table;
         end
     end
 
+    @info "AutoGenerator selected $(nameof(typeof(selected)))" columns=D rows=N private=(privacy !== nothing)
+
     return fit(selected, table;
                privacy = privacy, hints = hints,
                identifiers = identifiers, fill = fill, rng = rng)

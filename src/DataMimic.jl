@@ -20,6 +20,7 @@ include("engines/dp_copula.jl")
 include("fit.jl")
 include("sample.jl")
 include("serialize.jl")
+include("show.jl")
 include("evaluate/Evaluate.jl")
 
 # Abstract types

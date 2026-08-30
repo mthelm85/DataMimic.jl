@@ -1224,7 +1224,28 @@ using Lux, Zygote
                 @test fs.correlation_score ≈ 0.0 atol = 1e-10
             end
 
-            @testset "no shared columns → error" begin
+            # Fitted models hold the whole learned artifact; the default struct
+    # display dumps all of it (a small copula model printed >4000 chars, and a
+    # diffusion model holds millions of weights). Display must stay a summary.
+    @testset "fitted models display as a summary" begin
+        dfs = DataFrame(a = randn(200), b = rand(["x", "y", "z"], 200),
+                        id = ["r$i" for i in 1:200])
+        m = fit(CopulaGenerator(), dfs; identifiers = [:id],
+                fill = Dict(:id => :sequential), rng = MersenneTwister(3))
+
+        long  = sprint(show, MIME"text/plain"(), m)
+        short = sprint(show, m)
+
+        @test length(long)  < 400
+        @test length(short) < 200
+        @test occursin("FittedCopulaModel", short)
+        @test occursin("200 rows", long)
+        @test occursin("identifier", long)
+        # The learned artifact itself must not be dumped.
+        @test !occursin("EmpiricalMarginal", long)
+    end
+
+    @testset "no shared columns → error" begin
                 other = (; z = randn(50))
                 @test_throws ArgumentError fidelity_score(real_tbl, other)
             end
