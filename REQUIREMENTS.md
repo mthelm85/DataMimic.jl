@@ -213,6 +213,25 @@ a later phase.
 >    single "other" category before selection.
 > 5. **Budget split** is ½ selection / ½ measurement, against the reference's
 >    ⅓ selection / ⅓ 1-way / ⅓ 2-way.  Both are valid zCDP compositions.
+>
+> **Measured limitation — tree selection is effectively random at realistic ε.**
+> Each of the `d−1` selection steps gets `ε_step = √(8·ρ_select/(d−1))`.  On
+> Adult (`d = 15`) at `ε = 0.5`, that is `ε_step ≈ 0.03`, so the exponential
+> mechanism's weights are `∝ exp(ε_step·score/2) ≈ 1.008` across candidates —
+> indistinguishable from a uniform draw.  Confirmed empirically: swapping the
+> score function between mutual information and L1-from-independence produced
+> **bit-identical** synthetic data at every ε from 0.5 to 8, because the same
+> RNG draws select the same (essentially arbitrary) tree either way.
+>
+> This caps what any downstream estimator can achieve and is a more fundamental
+> limitation than the missing PGM step.  A prototype adding full Private-PGM
+> reconciliation (belief propagation + mirror descent, verified exact against
+> brute force) improved marginal fidelity substantially — 0.164 → 0.110 at
+> ε = 0.5 — but **regressed TSTR by ~0.10 at every ε** and was not landed:
+> reconciliation propagates structure across the selected tree, which does not
+> help when that tree is arbitrary.  Fixing selection should come first.
+> The prototype is preserved at `dev/mst-pgm-wip.patch`, and
+> `benchmark/eval_mst.jl` reproduces the sweep.
 
 ---
 
