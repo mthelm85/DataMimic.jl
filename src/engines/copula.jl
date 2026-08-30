@@ -41,31 +41,83 @@ end
 # ─── Copula fitting ─────────────────────────────────────────────────────────
 
 """
-Fit a copula to the numeric (non-identifier) columns.
-Returns the fitted copula object, or `nothing` if fitting is not possible.
+Encode one column as pseudo-observations in `[0, 1]` for copula fitting.
+
+Numeric columns use tied ranks, matching `Copulas.pseudos`.
+
+Categorical and binary columns use the *distributional transform*: a level
+occupying `[F(k-1), F(k)]` of the empirical CDF is mapped to a uniform draw
+inside that interval. Mapping every observation of a level to a single point
+instead would collapse the column to a handful of tied ranks and hide most of
+its dependence from the copula.
+
+The level order is taken from the column's fitted `CategoricalMarginal`, so
+encoding here and inversion at sampling time agree by construction. The
+association a copula can represent is monotone in that order, which is
+arbitrary for a nominal variable — so this captures a real part of the
+dependence, not all of it.
 """
-function _fit_copula(cols, copula_columns::Vector{Symbol}, nrows::Int,
-                     copula_type::Symbol)
+function _encode_pseudo(vals::Vector{Float64}, kind::Symbol,
+                        marginal, rng::AbstractRNG)
+    n = length(vals)
+    if kind in (:categorical, :binary)
+        probs = marginal.probs
+        cdf   = cumsum(probs)
+        u = Vector{Float64}(undef, n)
+        for i in 1:n
+            k  = Int(vals[i])                 # 1-based level index
+            lo = k == 1 ? 0.0 : cdf[k - 1]
+            hi = cdf[k]
+            u[i] = lo + rand(rng) * (hi - lo)
+        end
+        return u
+    end
+    return StatsBase.tiedrank(vals) ./ (n + 1)
+end
+
+"""
+Fit a copula over the statistical (non-identifier) columns.
+
+Categorical and binary columns participate through the ordinal encoding above,
+so dependence between them and the numeric columns is modelled rather than
+discarded. Returns the fitted copula, or `nothing` when fitting is not
+possible.
+"""
+function _fit_copula(cols, copula_columns::Vector{Symbol},
+                     kind_of::Dict{Symbol, Symbol},
+                     marginals::Dict{Symbol, Marginal},
+                     nrows::Int, copula_type::Symbol, rng::AbstractRNG)
     d = length(copula_columns)
 
     if d == 0
-        @warn "No numeric columns found; all columns are categorical/constant. " *
+        @warn "No modellable columns found. " *
               "Falling back to fully independent sampling."
         return nothing
     end
 
     if d == 1
-        @warn "Only one numeric column present; copula fitting skipped."
+        @warn "Only one modellable column present; copula fitting skipped."
         return nothing
     end
 
-    # Build float matrix (nrows × d) with NaN for missing values
+    # Numeric values, or 1-based level indices for categoricals.  NaN marks a
+    # value that cannot be placed (missing, non-finite, or an unseen level).
     X = Matrix{Float64}(undef, nrows, d)
     for (j, cname) in enumerate(copula_columns)
-        col = Tables.getcolumn(cols, cname)
-        for i in 1:nrows
-            v = col[i]
-            X[i, j] = ismissing(v) ? NaN : Float64(v)
+        col  = Tables.getcolumn(cols, cname)
+        kind = kind_of[cname]
+        if kind in (:categorical, :binary)
+            m = marginals[cname]::CategoricalMarginal
+            idx = Dict(v => k for (k, v) in enumerate(m.levels))
+            for i in 1:nrows
+                v = col[i]
+                X[i, j] = ismissing(v) ? NaN : Float64(get(idx, v, NaN))
+            end
+        else
+            for i in 1:nrows
+                v = col[i]
+                X[i, j] = ismissing(v) ? NaN : Float64(v)
+            end
         end
     end
 
@@ -79,8 +131,13 @@ function _fit_copula(cols, copula_columns::Vector{Symbol}, nrows::Int,
         return nothing
     end
 
-    # Copulas.jl convention: data matrix is (d × n_obs)
-    U = Copulas.pseudos(Matrix(Xc'))
+    # Pseudo-observations, one column at a time so each kind is encoded
+    # appropriately.  Copulas.jl expects a (d × n_obs) matrix.
+    U = Matrix{Float64}(undef, d, size(Xc, 1))
+    for (j, cname) in enumerate(copula_columns)
+        U[j, :] = _encode_pseudo(Xc[:, j], kind_of[cname],
+                                 get(marginals, cname, nothing), rng)
+    end
 
     if copula_type == :beta
         return StatsBase.fit(Copulas.BetaCopula, U)

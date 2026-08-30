@@ -203,7 +203,8 @@ using Lux, Zygote
         model = fit(CopulaGenerator(), df)
         idx = findfirst(==(:encoded), model.column_names)
         @test model.column_kinds[idx] == :categorical
-        @test !(:encoded in model.copula_columns)
+        # REQ-CPL-006: categoricals join the copula via ordinal encoding
+        @test :encoded in model.copula_columns
 
         syn = sample(model, 200)
         @test all(v -> v in [1, 2, 3], syn.encoded)
@@ -430,21 +431,48 @@ using Lux, Zygote
     # ════════════════════════════════════════════════════════════════════════
     # Single numeric / all categorical fallbacks
     # ════════════════════════════════════════════════════════════════════════
-    @testset "single numeric column (no copula)" begin
+    # REQ-CPL-004: the fallback threshold counts *modellable* columns, not
+    # numeric ones — a numeric column plus a categorical is now enough to fit
+    # a copula, and an all-categorical table is too.
+    @testset "one numeric + one categorical still fits a copula" begin
         df = DataFrame(x = randn(100), cat = rand(["a", "b", "c"], 100))
+        model = fit(CopulaGenerator(), df)
+        @test !isnothing(model.copula)
+        @test Set(model.copula_columns) == Set([:x, :cat])
+        syn = sample(model, 50)
+        @test nrow(syn) == 50
+        @test all(v -> v in ["a", "b", "c"], syn.cat)
+    end
+
+    @testset "all categorical fits a copula" begin
+        df = DataFrame(a = rand(["x", "y", "z"], 100),
+                        b = rand(["p", "q"], 100))
+        model = fit(CopulaGenerator(), df)
+        @test !isnothing(model.copula)
+        syn = sample(model, 30)
+        @test nrow(syn) == 30
+        @test all(v -> v in ["x", "y", "z"], syn.a)
+        @test all(v -> v in ["p", "q"], syn.b)
+    end
+
+    @testset "single modellable column falls back with a warning" begin
+        df = DataFrame(x = randn(100))
         model = @test_logs (:warn,) fit(CopulaGenerator(), df)
         @test isnothing(model.copula)
         syn = sample(model, 50)
         @test nrow(syn) == 50
     end
 
-    @testset "all categorical (no copula)" begin
-        df = DataFrame(a = rand(["x", "y", "z"], 100),
-                        b = rand(["p", "q"], 100))
-        model = @test_logs (:warn,) fit(CopulaGenerator(), df)
-        @test isnothing(model.copula)
-        syn = sample(model, 30)
-        @test nrow(syn) == 30
+    # A categorical that collapsed to one level cannot be encoded, so it is
+    # kept out of the copula and drawn independently.
+    @testset "single-level categorical is excluded from the copula" begin
+        df = DataFrame(x = randn(100), y = randn(100),
+                       flat = fill("only", 100))
+        model = fit(CopulaGenerator(), df)
+        @test !isnothing(model.copula)
+        @test !(:flat in model.copula_columns)
+        syn = sample(model, 40)
+        @test all(==("only"), syn.flat)
     end
 
     # ════════════════════════════════════════════════════════════════════════

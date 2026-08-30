@@ -27,6 +27,19 @@ function _cast_numeric(vals::Vector{Float64}, col_kind::Symbol, T::Type)
     end
 end
 
+# Invert uniform draws through a CategoricalMarginal's CDF.
+#
+# The inverse of the encoding used for copula fitting: a draw landing in
+# [F(k-1), F(k)] selects level k.  Level order comes from the same marginal, so
+# this and _encode_pseudo agree by construction.
+function _invert_categorical(m::CategoricalMarginal,
+                             u_vec::AbstractVector{Float64})
+    cdf  = cumsum(m.probs)
+    nlev = length(m.levels)
+    return [m.levels[clamp(searchsortedfirst(cdf, clamp(u, 0.0, 1.0)), 1, nlev)]
+            for u in u_vec]
+end
+
 # Draw n samples from a categorical marginal.
 function _sample_categorical(m::CategoricalMarginal, n::Int, rng::AbstractRNG)
     return StatsBase.sample(rng, m.levels, StatsBase.Weights(m.probs), n)
@@ -99,7 +112,10 @@ function sample(model::FittedCopulaModel, n::Int;
 
     name_to_idx = Dict(nm => i for (i, nm) in enumerate(col_names))
 
-    # ── 1. Copula-based sampling of numeric columns ──────────────────────
+    # ── 1. Copula-based sampling ─────────────────────────────────────────
+    #
+    # The copula spans numeric *and* categorical columns; each is inverted
+    # through the marginal it was encoded against at fit time.
     stat_numeric = model.copula_columns
 
     if !isnothing(model.copula) && length(stat_numeric) >= 2
@@ -108,10 +124,15 @@ function sample(model::FittedCopulaModel, n::Int;
 
         for (j, cname) in enumerate(stat_numeric)
             kind  = col_kinds[name_to_idx[cname]]
-            m     = model.marginals[cname]::EmpiricalMarginal
             u_vec = U_T[:, j]
-            vals  = _invert_empirical(m, u_vec)
-            result[cname] = _cast_numeric(vals, kind, m.original_eltype)
+            if kind in (:categorical, :binary)
+                m = model.marginals[cname]::CategoricalMarginal
+                result[cname] = _invert_categorical(m, u_vec)
+            else
+                m    = model.marginals[cname]::EmpiricalMarginal
+                vals = _invert_empirical(m, u_vec)
+                result[cname] = _cast_numeric(vals, kind, m.original_eltype)
+            end
         end
     else
         # No copula: sample numeric columns independently
@@ -126,10 +147,14 @@ function sample(model::FittedCopulaModel, n::Int;
         end
     end
 
-    # ── 2. Sample categorical / binary / constant columns ────────────────
+    # ── 2. Sample remaining categorical / binary / constant columns ──────
+    #
+    # Categoricals carried by the copula were filled above; only those left
+    # out of it (single-level, or no copula at all) are drawn independently.
     for (i, cname) in enumerate(col_names)
         kind = col_kinds[i]
         kind == :identifier && continue
+        haskey(result, cname) && continue
         if kind in (:categorical, :binary)
             m = model.marginals[cname]::CategoricalMarginal
             result[cname] = _sample_categorical(m, n, rng)

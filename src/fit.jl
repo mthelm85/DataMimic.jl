@@ -207,6 +207,7 @@ function _fit_engine(gen::CopulaGenerator, cols, col_names, id_set, fill_dict,
     marginals    = Dict{Symbol, Marginal}()
     miss         = Dict{Symbol, Float64}()
     copula_cols  = Symbol[]
+    kind_of      = Dict{Symbol, Symbol}()
 
     for name in col_names
         if name in id_set
@@ -242,14 +243,25 @@ function _fit_engine(gen::CopulaGenerator, cols, col_names, id_set, fill_dict,
         end
         push!(col_kinds, kind)
 
-        if kind in (:continuous, :integer)
+        # Categoricals join the copula via an ordinal encoding, so dependence
+        # between them and the numeric columns is modelled rather than dropped.
+        if kind in (:continuous, :integer, :categorical, :binary)
             push!(copula_cols, name)
+            kind_of[name] = kind
         end
 
         marginals[name] = _fit_marginal(nm, kind, T; hint = hint)
     end
 
-    copula = _fit_copula(cols, copula_cols, nrows, gen.copula_type)
+    # A categorical that collapsed to a single level carries no information for
+    # the copula and would make its encoding degenerate.
+    filter!(copula_cols) do name
+        kind_of[name] in (:categorical, :binary) || return true
+        length((marginals[name]::CategoricalMarginal).levels) >= 2
+    end
+
+    copula = _fit_copula(cols, copula_cols, kind_of, marginals,
+                         nrows, gen.copula_type, rng)
 
     id_cols = [name for name in col_names if name in id_set]
 

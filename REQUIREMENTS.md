@@ -178,13 +178,13 @@ verified against the source.
 | ID | Requirement | MoSCoW | Status | Phase |
 |----|-------------|--------|--------|-------|
 | **REQ-CPL-001** | `CopulaGenerator` shall fit independent empirical marginals (sorted non-missing values) for each numeric column. | Must | Done | 1 |
-| **REQ-CPL-002** | `CopulaGenerator(:beta)` shall fit a `BetaCopula` to model joint dependencies among numeric columns. | Must | Done | 1 |
+| **REQ-CPL-002** | `CopulaGenerator(:beta)` shall fit a `BetaCopula` to model joint dependencies among all modelled columns, numeric and categorical alike. | Must | Done | 1 |
 | **REQ-CPL-003** | `CopulaGenerator(:gaussian)` shall fit a Gaussian copula to the pseudo-observations via `Copulas.jl`, which defaults to maximum likelihood on normal scores (`:mle`). Rank-inversion methods (`:irho` Spearman, `:itau` Kendall) are available in `Copulas.jl` but are not currently selected. | Should | Done | 1 |
-| **REQ-CPL-004** | IF fewer than 2 numeric (non-identifier) columns exist, THEN `CopulaGenerator` shall emit `@warn` and fall back to independent sampling. | Must | Done | 1 |
-| **REQ-CPL-005** | IF fewer than 2 complete cases exist across all numeric columns, THEN `CopulaGenerator` shall emit `@warn` and fall back to independent sampling. | Must | Done | 1 |
-| **REQ-CPL-006** | `CopulaGenerator` shall sample `:categorical` and `:binary` columns independently from their empirical probability distributions. | Must | Done | 1 |
+| **REQ-CPL-004** | IF fewer than 2 modellable (non-identifier, non-constant) columns exist, THEN `CopulaGenerator` shall emit `@warn` and fall back to independent sampling. | Must | Done | 1 |
+| **REQ-CPL-005** | IF fewer than 2 complete cases exist across all modelled columns, THEN `CopulaGenerator` shall emit `@warn` and fall back to independent sampling. | Must | Done | 1 |
+| **REQ-CPL-006** | `CopulaGenerator` shall include `:categorical` and `:binary` columns in the copula via an ordinal encoding of their empirical CDF (the distributional transform), and shall sample them by inverting that CDF. A categorical column with fewer than 2 levels, or any categorical column when no copula could be fitted, shall instead be sampled independently from its empirical distribution. | Must | Done | 1 |
 | **REQ-CPL-007** | `CopulaGenerator` shall sample `:constant` columns as `fill(value, n)`. | Must | Done | 1 |
-| **REQ-CPL-008** | WHEN sampling numeric columns with a copula, the system shall map uniform samples through each column's empirical quantile function (inverse CDF). | Must | Done | 1 |
+| **REQ-CPL-008** | WHEN sampling with a copula, the system shall map uniform samples through each column's inverse CDF — the empirical quantile function for numeric columns, the level CDF for categorical ones. | Must | Done | 1 |
 | **REQ-CPL-009** | `FittedCopulaModel` shall store: `column_names`, `column_kinds`, `marginals`, `missingness`, `copula`, `copula_columns`, `n_original`, `identifier_columns`, `identifier_fills`, `rng`. | Must | Done | 1 |
 
 ---
