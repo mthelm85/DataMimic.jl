@@ -251,9 +251,10 @@ end
 ### 3.1 CopulaGenerator (Phase 1)
 
 Port of the v1 engine with two improvements:
-- **Gaussian copula option** via Spearman rank correlation → Pearson
-  conversion, avoiding the need for complete-case filtering that `BetaCopula`
-  requires.
+- **Gaussian copula option** fitted through `Copulas.jl` on rank-based
+  pseudo-observations (maximum likelihood on normal scores by default).  Note
+  that both copula types currently filter to complete cases over the numeric
+  columns before fitting.
 - **Tables.jl input/output** instead of hard-coded `DataFrame`.
 
 | Property | Value |
@@ -302,8 +303,11 @@ Port of the v1 engine with two improvements:
 
 TabDDPM architecture [Kotelnikov et al. 2023]. Gaussian diffusion for
 numerical features [Ho et al. 2020], multinomial diffusion for categoricals
-[Hoogeboom et al. 2021]. DP-SGD training via [Abadi et al. 2016] with
-Rényi DP accounting [Mironov 2017]. Loaded only when `Lux.jl` is present.
+[Hoogeboom et al. 2021]. DP-SGD training via [Abadi et al. 2016] — Poisson-
+subsampled lots, per-sample clipping, Gaussian noise — with Rényi DP
+accounting for the sampled Gaussian mechanism [Mironov 2017], [Mironov et
+al. 2019], which reports a valid upper bound on the privacy spend. Loaded
+only when `Lux.jl` is present.
 
 **Preprocessing:** Continuous features are Gaussian-quantile-normalized
 (empirical CDF → Φ⁻¹) following TabDDPM §4.1, which handles heavy-tailed

@@ -92,11 +92,13 @@ Papers and methods underpinning each engine and evaluation module.
 
 - **Mironov, I., Talwar, K., & Zhang, L. (2019).**
   *Rényi Differential Privacy of the Sampled Gaussian Mechanism.*
-  arXiv:1702.07476v3.
+  arXiv:1908.10530.
 
-  Exact privacy accounting via subsampled Rényi divergence. Computes
-  the (ε, δ) guarantee for the noise multiplier and number of training
-  steps.
+  Closed-form Rényi divergence of the Poisson-subsampled Gaussian at
+  integer orders — exact per order, but the reported (ε, δ) for a given
+  noise multiplier and step count is an upper bound, since the order
+  search is over a finite integer grid and the RDP → (ε, δ) conversion
+  is the standard [Mironov 2017] one.
 
 ---
 
@@ -107,8 +109,12 @@ Papers and methods underpinning each engine and evaluation module.
 - **Nelsen, R. B. (2006).**
   *An Introduction to Copulas.* 2nd edition. Springer.
 
-  General copula theory. The `CopulaGenerator` uses a Gaussian copula
-  (Spearman rank → Pearson conversion) to model column dependencies.
+  General copula theory. `CopulaGenerator` models dependence among the
+  *numeric* columns with a Gaussian (or Beta) copula fitted by `Copulas.jl`
+  to rank-based pseudo-observations — by default maximum likelihood on normal
+  scores, not the rank-inversion (Spearman/Kendall) estimators. Categorical
+  and binary columns are sampled independently from their empirical
+  distributions and are not part of the copula.
 
 ---
 
@@ -122,7 +128,16 @@ Papers and methods underpinning each engine and evaluation module.
   Journal of Privacy and Confidentiality, 11(3).
 
   MST algorithm: exponential-mechanism marginal selection → Gaussian-noise
-  measurement → PGM reconstruction. Used in `MSTGenerator`.
+  measurement → PGM reconstruction.
+
+  `MSTGenerator` implements a **simplified tree-structured variant** of this:
+  exponential-mechanism spanning-tree selection, Gaussian-noise measurement of
+  the root 1-way marginal and the tree's 2-way marginals, then ancestral
+  sampling from row-normalized conditionals. It does **not** run PGM inference
+  and does not measure all 1-way marginals. See the divergence note under
+  REQ-MST-007 in REQUIREMENTS.md, and the reference implementation at
+  [ryan112358/private-pgm](https://github.com/ryan112358/private-pgm)
+  (`mechanisms/mst.py`).
 
 ### Private Graphical Models
 
@@ -130,8 +145,10 @@ Papers and methods underpinning each engine and evaluation module.
   *Graphical-model based estimation and inference for differential privacy.*
   ICML 2019.
 
-  PGM inference engine used inside MST for reconstructing a full joint
-  distribution from noisy marginal measurements.
+  The PGM inference engine that MST uses to reconcile noisy marginal
+  measurements into a consistent joint distribution. **Not currently
+  implemented in DataMimic** — listed here as the reference for what
+  `MSTGenerator` would need in order to match the published algorithm.
 
 ---
 

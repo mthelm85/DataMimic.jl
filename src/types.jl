@@ -55,9 +55,18 @@ CopulaGenerator() = CopulaGenerator(:beta)
 """
     MSTGenerator(max_marginal_order::Int=2)
 
-Private synthetic data via MST (McKenna et al. 2021): exponential-mechanism
-marginal selection → Gaussian noise → junction tree → belief propagation.
-Satisfies (ε,δ)-DP via zCDP composition.
+Private synthetic data via a simplified tree-structured variant of MST
+(McKenna et al. 2021): exponential-mechanism spanning-tree selection over
+columns → Gaussian-noise measurement of the root 1-way marginal and the
+tree's 2-way marginals → ancestral sampling from the resulting
+`P(child | parent)` conditionals.  Satisfies (ε,δ)-DP via zCDP composition.
+
+Unlike the published algorithm this does **not** run Private-PGM inference and
+measures only the root 1-way marginal; see the divergence note under
+REQ-MST-007 in REQUIREMENTS.md.
+
+`max_marginal_order = 3` is accepted but not implemented — it warns and falls
+back to 2-way marginals.
 """
 struct MSTGenerator <: AbstractPrivateGenerator
     max_marginal_order::Int
