@@ -1,12 +1,16 @@
 using Documenter
 using DataMimic
+using MaterialDocs
 
 makedocs(
     sitename = "DataMimic.jl",
     modules  = [DataMimic],
     authors  = "Matt Helm",
-    format   = Documenter.HTML(
-        canonical = "https://mthelm85.github.io/DataMimic.jl",
+    format   = Material3(;
+        logo = "assets/logo.png",
+        favicon = "assets/favicon.png",
+        # Directory-style URLs (./engines/) can't be followed when the built
+        # docs are opened from disk, so keep them for CI only.
         prettyurls = get(ENV, "CI", nothing) == "true",
     ),
     pages = [

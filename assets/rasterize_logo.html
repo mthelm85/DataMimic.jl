@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rasterize DataMimic logo</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.55 system-ui, sans-serif; margin: 0; padding: 2rem;
+         max-width: 48rem; background: Canvas; color: CanvasText; }
+  h1 { font-size: 1.3rem; margin: 0 0 .4rem; }
+  p  { margin: .5rem 0 1rem; }
+  .muted { opacity: .75; }
+  .controls { display: flex; gap: 1rem; align-items: center;
+              flex-wrap: wrap; margin: 1.25rem 0; }
+  input[type=number] { width: 6.5rem; font: inherit; padding: .3rem .5rem; }
+  button { font: inherit; padding: .35rem .9rem; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  .preview { display: inline-block; padding: 1rem; border-radius: 6px;
+             background: repeating-conic-gradient(#8884 0% 25%, transparent 0% 50%)
+                         50% / 20px 20px; }
+  canvas { display: block; max-width: 100%; height: auto; }
+  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: .92em; }
+  #status { margin-top: .9rem; font-variant-numeric: tabular-nums; }
+  .note { border-left: 3px solid currentColor; padding: .1rem 0 .1rem .85rem;
+          opacity: .8; margin: 1.25rem 0; }
+</style>
+</head>
+<body>
+
+<h1>Rasterize the logo</h1>
+<p class="muted">
+  Renders <code>logo-source.svg</code> to a transparent PNG. Two variants come
+  out of the one master:
+</p>
+<ul class="muted">
+  <li><strong>Full</strong> — octopus and wordmark. This is
+      <code>docs/src/assets/logo-wordmark.png</code>, floated in the README at
+      200&nbsp;px where the wordmark is legible.</li>
+  <li><strong>Mark only</strong> — the octopus, cropped to its own bounds with
+      the wordmark dropped. This is <code>docs/src/assets/logo.png</code>, the
+      docs navbar icon. The navbar renders it 32&nbsp;px tall and already
+      prints "DataMimic.jl" beside it, so the wordmark would be both
+      illegible and redundant there.</li>
+  <li><strong>Favicon</strong> — the mark again, centred in a square canvas,
+      since the octopus is wider than it is tall and a favicon must be square.
+      This is <code>docs/src/assets/favicon.png</code>.</li>
+</ul>
+
+<div class="note">
+  Serve this page over HTTP rather than opening it from disk — browsers block
+  both <code>fetch</code> and canvas export on <code>file://</code>. From the
+  repository root:
+  <br><code>python -m http.server 8000</code> then open
+  <code>http://localhost:8000/assets/rasterize_logo.html</code>
+</div>
+
+<div class="controls">
+  <label>Width <input id="w" type="number" value="400" min="16" max="8000"></label>
+  <label>Variant
+    <select id="variant">
+      <option value="full">Full (octopus + wordmark)</option>
+      <option value="mark">Mark only</option>
+      <option value="favicon">Favicon (square)</option>
+    </select>
+  </label>
+  <button id="go">Render</button>
+  <button id="dl" disabled>Download PNG</button>
+</div>
+
+<div class="preview"><canvas id="c"></canvas></div>
+<div id="status">Ready.</div>
+
+<script>
+const SRC = 'logo-source.svg';
+const cv = document.getElementById('c');
+const statusEl = document.getElementById('status');
+const dl = document.getElementById('dl');
+
+// The octopus is a single <image>; the wordmark is the 12 paths inside
+// <g id="text353">. Cropping to the image's own bounds means reading its
+// placement and the translate on its parent <g>, rather than hard-coding
+// numbers that would rot if the artwork is re-exported.
+async function buildSvg(markOnly) {
+  const text = await fetch(SRC).then(r => {
+    if (!r.ok) throw new Error(`could not load ${SRC} (HTTP ${r.status})`);
+    return r.text();
+  });
+  const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+  if (doc.querySelector('parsererror')) throw new Error('logo-source.svg did not parse');
+  const svg = doc.documentElement;
+
+  if (markOnly) {
+    const word = doc.getElementById('text353');
+    if (word) word.remove();
+
+    const img = doc.querySelector('image');
+    if (!img) throw new Error('no <image> element found');
+    let x = parseFloat(img.getAttribute('x')) || 0;
+    let y = parseFloat(img.getAttribute('y')) || 0;
+    const w = parseFloat(img.getAttribute('width'));
+    const h = parseFloat(img.getAttribute('height'));
+
+    // Fold any translate() on ancestor groups into the crop origin.
+    for (let n = img.parentNode; n && n.nodeType === 1 && n !== svg; n = n.parentNode) {
+      const t = (n.getAttribute('transform') || '').match(
+        /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/);
+      if (t) { x += parseFloat(t[1]); y += parseFloat(t[2]); }
+    }
+    svg.setAttribute('viewBox', `${x} ${y} ${w} ${h}`);
+    svg.setAttribute('width', `${w}pt`);
+    svg.setAttribute('height', `${h}pt`);
+  }
+  return new XMLSerializer().serializeToString(doc);
+}
+
+function draw(svgText, width, square) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([svgText], {type: 'image/svg+xml'}));
+    const im = new Image();
+    im.onload = () => {
+      const cx = cv.getContext('2d');
+      if (square) {
+        // Letterbox into a square: the octopus is wider than it is tall, and
+        // a non-square favicon gets stretched by some browsers.
+        cv.width = cv.height = width;
+        const s = Math.min(width / im.width, width / im.height);
+        const w = im.width * s, h = im.height * s;
+        cx.clearRect(0, 0, width, width);
+        cx.drawImage(im, (width - w) / 2, (width - h) / 2, w, h);
+      } else {
+        cv.width = width;
+        cv.height = Math.max(1, Math.round(width * im.height / im.width));
+        // Left transparent on purpose: the artwork sits on the host page's own
+        // background in both the docs navbar and the README.
+        cx.clearRect(0, 0, cv.width, cv.height);
+        cx.drawImage(im, 0, 0, cv.width, cv.height);
+      }
+      URL.revokeObjectURL(url);
+      resolve();
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG failed to render')); };
+    im.src = url;
+  });
+}
+
+const FILENAME = {full: 'logo-wordmark.png', mark: 'logo.png', favicon: 'favicon.png'};
+
+document.getElementById('go').addEventListener('click', async () => {
+  const width = Math.max(16, Math.min(8000,
+    Number(document.getElementById('w').value) || 400));
+  const variant = document.getElementById('variant').value;
+  statusEl.textContent = 'Rendering…';
+  dl.disabled = true;
+  try {
+    await draw(await buildSvg(variant !== 'full'), width, variant === 'favicon');
+    statusEl.textContent = `Rendered ${cv.width} × ${cv.height} (${variant}).`;
+    dl.disabled = false;
+  } catch (e) {
+    statusEl.textContent = e.message;
+  }
+});
+
+dl.addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.download = FILENAME[document.getElementById('variant').value];
+  a.href = cv.toDataURL('image/png');
+  a.click();
+});
+</script>
+</body>
+</html>

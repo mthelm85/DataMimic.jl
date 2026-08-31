@@ -1,26 +1,52 @@
 # Logo source
 
-`logo-source.png` is the full-resolution original: 1312 × 1199 RGBA, 850 KB.
-It is the master. Nothing references it at build time — it lives here so the
-shipped asset can be regenerated at any size later.
+`logo-source.svg` is the master: the octopus as an embedded 1536 × 1280 raster,
+plus the "DataMimic.jl" wordmark as 12 real vector paths. Nothing references it
+at build time — it lives here so the displayed assets can be regenerated.
 
-The asset actually used is `docs/src/assets/logo.png`, 400 × 366 and 117 KB.
-Documenter picks that path up automatically (no `make.jl` configuration), and
-the README floats the same file, so there is one displayed asset and one
-master.
+Three displayed assets are derived from it, all in `docs/src/assets/`:
 
-Regenerate it with:
+| File | Size | Used by |
+|---|---|---|
+| `logo.png` | 400 × 333 | Docs navbar (`Material3(logo=…)`) — the octopus alone |
+| `favicon.png` | 256 × 256 | Docs favicon (`Material3(favicon=…)`) — the octopus, squared |
+| `logo-wordmark.png` | 400 × 368 | README header — octopus and wordmark |
+
+The docs get the octopus **without** the wordmark on purpose. The navbar
+renders the logo 32 px tall and already prints "DataMimic.jl" beside it, so the
+wordmark would be both illegible at that size and redundant next to the name.
+The README shows it at 320 px, where the wordmark reads clearly and carries the
+title.
+
+## Regenerating
+
+Serve the repository over HTTP and open the tool — browsers block both `fetch`
+and canvas export on `file://`, so opening it straight from disk will not work:
 
 ```bash
-python assets/downscale_logo.py         # 400px, the committed width
-python assets/downscale_logo.py 800     # or any other width
+python -m http.server 8000
 ```
 
-The script is pure stdlib, so it needs no imaging library. It premultiplies
-alpha before averaging — the background is transparent *black*, `(0,0,0,0)`,
-so averaging straight RGB would pull every edge pixel toward black and leave a
-dark fringe around the artwork.
+Then open <http://localhost:8000/assets/rasterize_logo.html>, pick a width and
+variant, and download. It derives the mark by dropping the wordmark group and
+cropping to the octopus's own bounds, reading that geometry from the SVG rather
+than hard-coding numbers that would rot on re-export.
+
+Any real SVG rasterizer works for the full logo:
+
+```bash
+rsvg-convert -w 400 assets/logo-source.svg -o docs/src/assets/logo-wordmark.png
+```
+
+## Notes
 
 This directory sits outside `docs/src/` deliberately: everything under
-`docs/src/assets/` is copied into the built site, and the 850 KB master has no
-reason to be served to readers.
+`docs/src/assets/` is copied into the built site, and the megabyte master has
+no reason to be served to readers.
+
+The SVG as exported carried its embedded PNG **twice** — once in `<defs>` under
+an id nothing referenced, and once in the body — along with an empty Inkscape
+flowed-text box. Dropping the unreferenced copy took it from 2247 KB to
+1128 KB, and rendered output was verified pixel-identical before and after
+(0 differing pixels of 147,200 at 400 px). If the logo is ever re-exported from
+a vector editor, check for that duplicate again.
