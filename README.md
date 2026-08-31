@@ -176,6 +176,20 @@ model = load(path)
 Uses Julia's `Serialization`, so files are portable within a Julia version but
 may not load across versions. A version header is written and checked.
 
+### Comparing engines
+
+```julia
+compare([CopulaGenerator(), MSTGenerator()], df;
+        metrics = (fidelity = fidelity_score,
+                   utility  = (r, s) -> utility_tstr(r, s, :income).ratio),
+        n_seeds = 5,
+        privacy = PrivacyBudget(epsilon = 1.0))
+```
+
+Fits each generator, samples, and scores it — one row per generator/metric with
+mean, standard deviation across seeds, and fit time. A failing engine is
+reported rather than aborting the run. The result is a Tables.jl table.
+
 ### Evaluation
 
 ```julia

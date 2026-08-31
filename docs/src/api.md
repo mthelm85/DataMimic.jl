@@ -47,6 +47,7 @@ load
 ## Evaluation
 
 ```@docs
+compare
 fidelity_score
 utility_tstr
 privacy_dcr

@@ -55,6 +55,41 @@ d.exact_matches # synthetic rows identical to a real row
 synthetic rows sit close to real ones, which is worth investigating even when
 the generator carries a formal privacy guarantee.
 
+## Comparing engines
+
+Rather than guessing which engine suits your data, measure it:
+
+```julia
+compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator()], df;
+        metrics = (fidelity = fidelity_score,
+                   utility  = (r, s) -> utility_tstr(r, s, :income).ratio),
+        n_seeds = 5,
+        privacy = PrivacyBudget(epsilon = 1.0))
+```
+
+One row per generator and metric, with the mean and standard deviation across
+seeds and the mean fit time. The result is a Tables.jl table, so `DataFrame(…)`
+sorts and pivots it. Public and private generators can appear in the same call:
+the budget is passed only to those that need it.
+
+Three things worth knowing:
+
+**A failing engine does not stop the run.** It is reported with `ok = false`
+and its error message, and the others continue. A diffusion model that diverges
+should not cost you an overnight comparison of everything else.
+
+**Report the spread, not just the mean.** `MSTGenerator`'s utility ratio has a
+seed-to-seed standard deviation near 0.06 at ε = 0.5 — larger than most
+differences worth acting on. Three seeds is the floor; below that the reported
+`sd` is meaningless and `compare` warns.
+
+**Results are about the settings you passed, not the engine in the abstract.**
+Engines differ enormously in how much they depend on their hyperparameters. A
+`DiffusionGenerator` left at a low epoch count can score no better than
+independent sampling, which says the model was undertrained, not that diffusion
+is a poor method. Give each engine a fair configuration before concluding
+anything from the ranking.
+
 ## Sweeping the budget
 
 ```julia

@@ -44,5 +44,6 @@ using .Evaluate
 export Evaluate
 export fidelity_score, privacy_dcr, utility_tstr
 export jensen_shannon, pairwise_marginal_error, privacy_utility_sweep
+export compare
 
 end

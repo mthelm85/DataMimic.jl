@@ -8,6 +8,7 @@
 #   jensen_shannon(real, synth)           — per-column Jensen–Shannon divergence
 #   pairwise_marginal_error(real, synth)  — 2-way/3-way joint distribution TVD
 #   privacy_utility_sweep(gen, table, εs, metric_fn) — ε sweep
+#   compare(generators, table)            — engines side by side on your data
 #
 # References:
 #   [Zhao et al. 2021]    — DCR metric
@@ -32,8 +33,10 @@ include("tstr.jl")
 include("jsd.jl")
 include("marginal_error.jl")
 include("sweep.jl")
+include("compare.jl")
 
 export fidelity_score, privacy_dcr, utility_tstr
 export jensen_shannon, pairwise_marginal_error, privacy_utility_sweep
+export compare
 
 end

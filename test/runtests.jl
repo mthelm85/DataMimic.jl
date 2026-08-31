@@ -5,6 +5,12 @@ using Random
 using LinearAlgebra: eigvals
 using Lux, Zygote
 
+# A generator that always fails, used to check that compare() isolates a
+# broken engine instead of letting it abort the whole comparison.
+struct BoomGenerator <: DataMimic.AbstractGenerator end
+DataMimic._fit_engine(::BoomGenerator, args...) = error("engine exploded")
+DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
+
 @testset "DataMimic.jl v2.0" begin
 
     # ── Helpers ──────────────────────────────────────────────────────────────
@@ -1209,6 +1215,89 @@ using Lux, Zygote
         model_eval = fit(CopulaGenerator(), real_tbl;
                          rng = MersenneTwister(1))
         synth_tbl = sample(model_eval, n; rng = MersenneTwister(2))
+
+        # ── compare ─────────────────────────────────────────────────────
+        @testset "compare" begin
+            pb_eval = PrivacyBudget(epsilon = 1.0)
+            cdf = DataFrame(a = randn(rng_eval, 300),
+                            b = randn(rng_eval, 300) .* 2,
+                            c = rand(rng_eval, ["x", "y", "z"], 300))
+
+            @testset "one row per generator x metric" begin
+                res = compare([CopulaGenerator(), CopulaGenerator(:gaussian)], cdf;
+                              metrics = (fid = fidelity_score,
+                                         dcr = (r, s) -> privacy_dcr(r, s).median),
+                              n_seeds = 3, rng = MersenneTwister(1))
+                @test length(res) == 4
+                @test DataMimic.Tables.istable(res)
+                @test all(r -> r.ok, res)
+                @test all(r -> r.n_seeds == 3, res)
+                @test all(r -> isfinite(r.mean) && isfinite(r.sd), res)
+                @test all(r -> isfinite(r.fit_secs), res)
+            end
+
+            # Variants of one engine must be distinguishable, or the output is
+            # unreadable for the most common use of the function.
+            @testset "labels distinguish generator variants" begin
+                res = compare([CopulaGenerator(), CopulaGenerator(:gaussian)], cdf;
+                              metrics = (fid = fidelity_score,), n_seeds = 3,
+                              rng = MersenneTwister(2))
+                labels = unique(r.generator for r in res)
+                @test length(labels) == 2
+                @test any(l -> occursin("beta", l), labels)
+                @test any(l -> occursin("gaussian", l), labels)
+
+                # Explicit labels win.
+                res2 = compare(["A" => CopulaGenerator(), "B" => CopulaGenerator()], cdf;
+                               metrics = (fid = fidelity_score,), n_seeds = 3,
+                               rng = MersenneTwister(3))
+                @test Set(r.generator for r in res2) == Set(["A", "B"])
+
+                # Genuinely identical generators are numbered rather than merged.
+                res3 = compare([DPCopulaGenerator(), DPCopulaGenerator()], cdf;
+                               metrics = (fid = fidelity_score,), n_seeds = 3,
+                               privacy = pb_eval, rng = MersenneTwister(4))
+                @test length(unique(r.generator for r in res3)) == 2
+            end
+
+            # A single failing engine must not destroy the whole comparison.
+            @testset "a failing generator is isolated" begin
+                res = compare([CopulaGenerator(), BoomGenerator()], cdf;
+                              metrics = (fid = fidelity_score,), n_seeds = 2,
+                              rng = MersenneTwister(5))
+                good = only(filter(r -> !occursin("Boom", r.generator), res))
+                bad  = only(filter(r ->  occursin("Boom", r.generator), res))
+                @test good.ok && isfinite(good.mean)
+                @test !bad.ok
+                @test bad.n_failed == 2
+                @test isnan(bad.mean)
+                @test occursin("exploded", bad.error)
+            end
+
+            @testset "mixed public and private generators in one call" begin
+                res = compare([CopulaGenerator(), MSTGenerator()], cdf;
+                              metrics = (fid = fidelity_score,), n_seeds = 3,
+                              privacy = pb_eval, rng = MersenneTwister(6))
+                @test length(res) == 2
+                @test all(r -> r.ok, res)
+            end
+
+            @testset "metric may return a plain number" begin
+                res = compare([CopulaGenerator()], cdf;
+                              metrics = (agg = (r, s) -> fidelity_score(r, s).aggregate,),
+                              n_seeds = 3, rng = MersenneTwister(7))
+                @test only(res).ok
+                @test isfinite(only(res).mean)
+            end
+
+            @testset "invalid input" begin
+                @test_throws ArgumentError compare([], cdf)
+                @test_throws ArgumentError compare([CopulaGenerator()], cdf;
+                                                   metrics = NamedTuple())
+                @test_throws ArgumentError compare([CopulaGenerator()], cdf; n_seeds = 0)
+                @test_throws ArgumentError compare([CopulaGenerator()], "not a table")
+            end
+        end
 
         # ── fidelity_score ──────────────────────────────────────────────
         @testset "fidelity_score" begin
