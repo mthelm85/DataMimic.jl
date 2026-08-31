@@ -1,0 +1,65 @@
+[meta]
+julia = "1.12.6"
+device = "gpu"
+machine = "znver2/x86_64-w64-mingw32/gpu"
+recorded = "2026-08-31T08:58:44.229"
+
+[cases."copula_beta/fit"]
+median = 0.04999995231628418
+min = 0.04399991035461426
+
+[cases."copula_beta/sample_20k"]
+median = 0.012000083923339844
+min = 0.011999845504760742
+
+[cases."eval/jensen_shannon"]
+median = 0.005000114440917969
+min = 0.004999876022338867
+
+[cases."mst/sample_20k"]
+median = 0.009999990463256836
+min = 0.00800013542175293
+
+[cases."eval/pairwise_marginal_error"]
+median = 1.3640000820159912
+min = 1.3289999961853027
+
+[cases."internal/rdp_accountant_x65"]
+median = 0.0019998550415039062
+min = 0.0010001659393310547
+
+[cases."diffusion/sample_10k"]
+median = 0.559999942779541
+min = 0.5590000152587891
+
+[cases."eval/privacy_dcr_2k"]
+median = 0.12000012397766113
+min = 0.11899995803833008
+
+[cases."dpcopula/fit"]
+median = 0.023000001907348633
+min = 0.023000001907348633
+
+[cases."diffusion/fit_3ep"]
+median = 0.44900012016296387
+min = 0.44499993324279785
+
+[cases."eval/utility_tstr"]
+median = 0.32700014114379883
+min = 0.3020000457763672
+
+[cases."mst/fit"]
+median = 0.09299993515014648
+min = 0.09299993515014648
+
+[cases."eval/fidelity_score"]
+median = 0.02200007438659668
+min = 0.019999980926513672
+
+[cases."copula_gaussian/fit"]
+median = 0.042999982833862305
+min = 0.03699994087219238
+
+[cases."internal/quantile_forward_200k"]
+median = 0.06599998474121094
+min = 0.06599998474121094
