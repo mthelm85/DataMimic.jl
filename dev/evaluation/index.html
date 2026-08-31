@@ -1,16 +1,114 @@
-<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Evaluation · DataMimic.jl</title><meta name="title" content="Evaluation · DataMimic.jl"/><meta property="og:title" content="Evaluation · DataMimic.jl"/><meta property="twitter:title" content="Evaluation · DataMimic.jl"/><meta name="description" content="Documentation for DataMimic.jl."/><meta property="og:description" content="Documentation for DataMimic.jl."/><meta property="twitter:description" content="Documentation for DataMimic.jl."/><meta property="og:url" content="https://mthelm85.github.io/DataMimic.jl/evaluation/"/><meta property="twitter:url" content="https://mthelm85.github.io/DataMimic.jl/evaluation/"/><link rel="canonical" href="https://mthelm85.github.io/DataMimic.jl/evaluation/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.png" alt="DataMimic.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">DataMimic.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../engines/">Engines</a></li><li><a class="tocitem" href="../privacy/">Privacy</a></li><li class="is-active"><a class="tocitem" href>Evaluation</a><ul class="internal"><li><a class="tocitem" href="#Fidelity"><span>Fidelity</span></a></li><li><a class="tocitem" href="#Utility"><span>Utility</span></a></li><li><a class="tocitem" href="#Privacy"><span>Privacy</span></a></li><li><a class="tocitem" href="#Comparing-engines"><span>Comparing engines</span></a></li><li><a class="tocitem" href="#Sweeping-the-budget"><span>Sweeping the budget</span></a></li></ul></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Evaluation</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Evaluation</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/mthelm85/DataMimic.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/mthelm85/DataMimic.jl/blob/main/docs/src/evaluation.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Evaluation"><a class="docs-heading-anchor" href="#Evaluation">Evaluation</a><a id="Evaluation-1"></a><a class="docs-heading-anchor-permalink" href="#Evaluation" title="Permalink"></a></h1><p>Synthetic data is worth exactly what it preserves, so measure it. DataMimic ships three families of metric: fidelity (does it look like the original), utility (is it useful downstream), and privacy (how close does it sit to real records).</p><h2 id="Fidelity"><a class="docs-heading-anchor" href="#Fidelity">Fidelity</a><a id="Fidelity-1"></a><a class="docs-heading-anchor-permalink" href="#Fidelity" title="Permalink"></a></h2><pre><code class="language-julia hljs">f = fidelity_score(real, synth)
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Evaluation — DataMimic.jl</title>
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=a5e46705">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="icon" href="../assets/favicon.png">
+  <script>
+    (function(){
+      document.documentElement.classList.add('no-transition');
+      window.addEventListener('load',function(){setTimeout(function(){document.documentElement.classList.remove('no-transition');},50);});
+    })()
+  </script>
+</head>
+<body>
+  <header class="md-navbar">
+    <button id="md-hamburger" class="md-hamburger" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <img class="md-navbar-logo" src="../assets/logo.png" alt="DataMimic.jl logo" height="32">
+    <span class="md-navbar-title">DataMimic.jl</span>
+    <span style="flex:1"></span>
+    <button id="md-search-btn" class="md-icon-btn" title="Search (Ctrl+K)" aria-label="Search documentation">🔍</button>
+  </header>
+  <div class="md-layout">
+    <nav class="md-sidebar">
+      <a href="../">Home</a>
+      <a href="../engines/">Engines</a>
+      <a href="../privacy/">Privacy</a>
+      <a href="../evaluation/">Evaluation</a>
+      <a href="../api/">API</a>
+    </nav>
+    <main class="md-content">
+      <article class="md-article">
+<h1 id="Evaluation" class="md-heading">Evaluation<a href="#Evaluation" class="md-heading-anchor" aria-label="Link to this section">#</a></h1>
+<p>Synthetic data is worth exactly what it preserves, so measure it. DataMimic ships three families of metric: fidelity (does it look like the original), utility (is it useful downstream), and privacy (how close does it sit to real records).</p>
+<h2 id="Fidelity" class="md-heading">Fidelity<a href="#Fidelity" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">f = fidelity_score(real, synth)
 f.aggregate            # overall, 0 = perfect
 f.column_scores        # per column
 f.correlation_score    # Spearman correlation agreement
-f.correlation_excluded # numeric columns skipped (no variance)</code></pre><p>Numeric columns are compared by the Kolmogorov–Smirnov statistic, categoricals by total variation distance. Columns with no variance are excluded from the correlation term — their ranks are constant, so any correlation involving them is undefined — but they are still scored individually.</p><p>Related:</p><pre><code class="language-julia hljs">jensen_shannon(real, synth; n_bins = 50)
-pairwise_marginal_error(real, synth; order = 2)</code></pre><h2 id="Utility"><a class="docs-heading-anchor" href="#Utility">Utility</a><a id="Utility-1"></a><a class="docs-heading-anchor-permalink" href="#Utility" title="Permalink"></a></h2><pre><code class="language-julia hljs">t = utility_tstr(real, synth, :target; test = holdout)
+f.correlation_excluded # numeric columns skipped (no variance)</code></pre>
+</div>
+<p>Numeric columns are compared by the Kolmogorov–Smirnov statistic, categoricals by total variation distance. Columns with no variance are excluded from the correlation term — their ranks are constant, so any correlation involving them is undefined — but they are still scored individually.</p>
+<p>Related:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">jensen_shannon(real, synth; n_bins = 50)
+pairwise_marginal_error(real, synth; order = 2)</code></pre>
+</div>
+<h2 id="Utility" class="md-heading">Utility<a href="#Utility" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">t = utility_tstr(real, synth, :target; test = holdout)
 t.synth_score   # macro-F1 training on synthetic
 t.real_score    # macro-F1 training on real
-t.ratio         # synth / real</code></pre><p>Train-on-synthetic, test-on-real. Gradient-boosted trees are fitted to the synthetic data and scored against real held-out data. Pass <code>test</code> explicitly where you have a holdout; otherwise an internal split is used.</p><p>A ratio near 1 means a model trained on synthetic data is about as good as one trained on the real thing.</p><h2 id="Privacy"><a class="docs-heading-anchor" href="#Privacy">Privacy</a><a id="Privacy-1"></a><a class="docs-heading-anchor-permalink" href="#Privacy" title="Permalink"></a></h2><pre><code class="language-julia hljs">d = privacy_dcr(real, synth)
+t.ratio         # synth / real</code></pre>
+</div>
+<p>Train-on-synthetic, test-on-real. Gradient-boosted trees are fitted to the synthetic data and scored against real held-out data. Pass <code class="md-code-inline">test</code> explicitly where you have a holdout; otherwise an internal split is used.</p>
+<p>A ratio near 1 means a model trained on synthetic data is about as good as one trained on the real thing.</p>
+<h2 id="Privacy" class="md-heading">Privacy<a href="#Privacy" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">d = privacy_dcr(real, synth)
 d.median        # median distance to closest real record
-d.exact_matches # synthetic rows identical to a real row</code></pre><p><code>exact_matches</code> should be zero or near it. A very small median DCR means synthetic rows sit close to real ones, which is worth investigating even when the generator carries a formal privacy guarantee.</p><h2 id="Comparing-engines"><a class="docs-heading-anchor" href="#Comparing-engines">Comparing engines</a><a id="Comparing-engines-1"></a><a class="docs-heading-anchor-permalink" href="#Comparing-engines" title="Permalink"></a></h2><p>Rather than guessing which engine suits your data, measure it:</p><pre><code class="language-julia hljs">compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator()], df;
+d.exact_matches # synthetic rows identical to a real row</code></pre>
+</div>
+<p><code class="md-code-inline">exact_matches</code> should be zero or near it. A very small median DCR means synthetic rows sit close to real ones, which is worth investigating even when the generator carries a formal privacy guarantee.</p>
+<h2 id="Comparing-engines" class="md-heading">Comparing engines<a href="#Comparing-engines" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>Rather than guessing which engine suits your data, measure it:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator()], df;
         metrics = (fidelity = fidelity_score,
                    utility  = (r, s) -&gt; utility_tstr(r, s, :income).ratio),
         n_seeds = 5,
-        privacy = PrivacyBudget(epsilon = 1.0))</code></pre><p>One row per generator and metric, with the mean and standard deviation across seeds and the mean fit time. The result is a Tables.jl table, so <code>DataFrame(…)</code> sorts and pivots it. Public and private generators can appear in the same call: the budget is passed only to those that need it.</p><p>Three things worth knowing:</p><p><strong>A failing engine does not stop the run.</strong> It is reported with <code>ok = false</code> and its error message, and the others continue. A diffusion model that diverges should not cost you an overnight comparison of everything else.</p><p><strong>Report the spread, not just the mean.</strong> <code>MSTGenerator</code>&#39;s utility ratio has a seed-to-seed standard deviation near 0.06 at ε = 0.5 — larger than most differences worth acting on. Three seeds is the floor; below that the reported <code>sd</code> is meaningless and <code>compare</code> warns.</p><p><strong>Results are about the settings you passed, not the engine in the abstract.</strong> Engines differ enormously in how much they depend on their hyperparameters. A <code>DiffusionGenerator</code> left at a low epoch count can score no better than independent sampling, which says the model was undertrained, not that diffusion is a poor method. Give each engine a fair configuration before concluding anything from the ranking.</p><h2 id="Sweeping-the-budget"><a class="docs-heading-anchor" href="#Sweeping-the-budget">Sweeping the budget</a><a id="Sweeping-the-budget-1"></a><a class="docs-heading-anchor-permalink" href="#Sweeping-the-budget" title="Permalink"></a></h2><pre><code class="language-julia hljs">privacy_utility_sweep(generator, table, epsilons, metric_fn; kw...)</code></pre><p>Fits the generator once per ε and applies <code>metric_fn(real, synth)</code>, which is the practical way to choose a budget for a given dataset. Results at low ε carry substantial seed noise — sweep several seeds before drawing conclusions.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../privacy/">« Privacy</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Monday 31 August 2026 02:29">Monday 31 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+        privacy = PrivacyBudget(epsilon = 1.0))</code></pre>
+</div>
+<p>One row per generator and metric, with the mean and standard deviation across seeds and the mean fit time. The result is a Tables.jl table, so <code class="md-code-inline">DataFrame(…)</code> sorts and pivots it. Public and private generators can appear in the same call: the budget is passed only to those that need it.</p>
+<p>Three things worth knowing:</p>
+<p><strong>A failing engine does not stop the run.</strong> It is reported with <code class="md-code-inline">ok = false</code> and its error message, and the others continue. A diffusion model that diverges should not cost you an overnight comparison of everything else.</p>
+<p><strong>Report the spread, not just the mean.</strong> <code class="md-code-inline">MSTGenerator</code>&#39;s utility ratio has a seed-to-seed standard deviation near 0.06 at ε = 0.5 — larger than most differences worth acting on. Three seeds is the floor; below that the reported <code class="md-code-inline">sd</code> is meaningless and <code class="md-code-inline">compare</code> warns.</p>
+<p><strong>Results are about the settings you passed, not the engine in the abstract.</strong> Engines differ enormously in how much they depend on their hyperparameters. A <code class="md-code-inline">DiffusionGenerator</code> left at a low epoch count can score no better than independent sampling, which says the model was undertrained, not that diffusion is a poor method. Give each engine a fair configuration before concluding anything from the ranking.</p>
+<h2 id="Sweeping-the-budget" class="md-heading">Sweeping the budget<a href="#Sweeping-the-budget" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">privacy_utility_sweep(generator, table, epsilons, metric_fn; kw...)</code></pre>
+</div>
+<p>Fits the generator once per ε and applies <code class="md-code-inline">metric_fn(real, synth)</code>, which is the practical way to choose a budget for a given dataset. Results at low ε carry substantial seed noise — sweep several seeds before drawing conclusions.</p>
+      </article>
+      <footer class="md-footer">
+        <p>Built with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and <a href="https://github.com/mthelm85/MaterialDocs.jl">MaterialDocs.jl</a></p>
+      </footer>
+    </main>
+    <aside class="md-toc">
+      <div class="md-toc-inner">
+        <p class="md-toc-title">On this page</p>
+          <a class="md-toc-link md-toc-h2" href="#Fidelity">Fidelity</a>
+          <a class="md-toc-link md-toc-h2" href="#Utility">Utility</a>
+          <a class="md-toc-link md-toc-h2" href="#Privacy">Privacy</a>
+          <a class="md-toc-link md-toc-h2" href="#Comparing-engines">Comparing engines</a>
+          <a class="md-toc-link md-toc-h2" href="#Sweeping-the-budget">Sweeping the budget</a>
+      </div>
+    </aside>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia-repl.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <script src="../assets/materialdocs.js?v=a5e46705"></script>
+</body>
+</html>

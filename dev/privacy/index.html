@@ -1,8 +1,88 @@
-<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Privacy · DataMimic.jl</title><meta name="title" content="Privacy · DataMimic.jl"/><meta property="og:title" content="Privacy · DataMimic.jl"/><meta property="twitter:title" content="Privacy · DataMimic.jl"/><meta name="description" content="Documentation for DataMimic.jl."/><meta property="og:description" content="Documentation for DataMimic.jl."/><meta property="twitter:description" content="Documentation for DataMimic.jl."/><meta property="og:url" content="https://mthelm85.github.io/DataMimic.jl/privacy/"/><meta property="twitter:url" content="https://mthelm85.github.io/DataMimic.jl/privacy/"/><link rel="canonical" href="https://mthelm85.github.io/DataMimic.jl/privacy/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.png" alt="DataMimic.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">DataMimic.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../engines/">Engines</a></li><li class="is-active"><a class="tocitem" href>Privacy</a><ul class="internal"><li><a class="tocitem" href="#What-the-budget-covers"><span>What the budget covers</span></a></li><li><a class="tocitem" href="#Choosing-ε"><span>Choosing ε</span></a></li><li><a class="tocitem" href="#What-differential-privacy-does-not-give-you"><span>What differential privacy does not give you</span></a></li></ul></li><li><a class="tocitem" href="../evaluation/">Evaluation</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Privacy</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Privacy</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/mthelm85/DataMimic.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/mthelm85/DataMimic.jl/blob/main/docs/src/privacy.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Privacy"><a class="docs-heading-anchor" href="#Privacy">Privacy</a><a id="Privacy-1"></a><a class="docs-heading-anchor-permalink" href="#Privacy" title="Permalink"></a></h1><p>Private engines take a <a href="../api/#DataMimic.PrivacyBudget"><code>PrivacyBudget</code></a> and satisfy (ε, δ)-differential privacy. Public engines reject a budget rather than silently ignoring it.</p><pre><code class="language-julia hljs">budget = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
-model  = fit(MSTGenerator(), df; privacy = budget)</code></pre><p><code>δ</code> defaults to <code>1e-5</code>. Smaller <code>ε</code> means more privacy and less utility.</p><h2 id="What-the-budget-covers"><a class="docs-heading-anchor" href="#What-the-budget-covers">What the budget covers</a><a id="What-the-budget-covers-1"></a><a class="docs-heading-anchor-permalink" href="#What-the-budget-covers" title="Permalink"></a></h2><p>Each private engine spends its whole budget internally and composes the pieces using zero-concentrated differential privacy (zCDP), which converts to (ε, δ)-DP at the end.</p><ul><li><strong><code>MSTGenerator</code></strong> splits the budget across selecting the tree, measuring the one-way marginals, and measuring the selected two-way marginals. Reconciling those measurements is post-processing and costs nothing further.</li><li><strong><code>DPCopulaGenerator</code></strong> splits between the histogram marginals and the private covariance matrix.</li><li><strong><code>DiffusionGenerator(dp = true)</code></strong> trains with DP-SGD — per-example gradient clipping plus Gaussian noise — accounted with Rényi DP over Poisson-subsampled minibatches.</li></ul><p>Sampling from a fitted private model is post-processing: draw as many synthetic rows as you like without spending more budget.</p><h2 id="Choosing-ε"><a class="docs-heading-anchor" href="#Choosing-ε">Choosing ε</a><a id="Choosing-ε-1"></a><a class="docs-heading-anchor-permalink" href="#Choosing-ε" title="Permalink"></a></h2><p>There is no universally correct value. As a rough guide, ε below 1 is conservative, 1–3 is a common working range, and above 8 offers weak formal protection. Measure rather than guess:</p><pre><code class="language-julia hljs">using DataMimic
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy — DataMimic.jl</title>
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=c111173e">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="icon" href="../assets/favicon.png">
+  <script>
+    (function(){
+      document.documentElement.classList.add('no-transition');
+      window.addEventListener('load',function(){setTimeout(function(){document.documentElement.classList.remove('no-transition');},50);});
+    })()
+  </script>
+</head>
+<body>
+  <header class="md-navbar">
+    <button id="md-hamburger" class="md-hamburger" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <img class="md-navbar-logo" src="../assets/logo.png" alt="DataMimic.jl logo" height="32">
+    <span class="md-navbar-title">DataMimic.jl</span>
+    <span style="flex:1"></span>
+    <button id="md-search-btn" class="md-icon-btn" title="Search (Ctrl+K)" aria-label="Search documentation">🔍</button>
+  </header>
+  <div class="md-layout">
+    <nav class="md-sidebar">
+      <a href="../">Home</a>
+      <a href="../engines/">Engines</a>
+      <a href="../privacy/">Privacy</a>
+      <a href="../evaluation/">Evaluation</a>
+      <a href="../api/">API</a>
+    </nav>
+    <main class="md-content">
+      <article class="md-article">
+<h1 id="Privacy" class="md-heading">Privacy<a href="#Privacy" class="md-heading-anchor" aria-label="Link to this section">#</a></h1>
+<p>Private engines take a <a href="../api/#DataMimic.PrivacyBudget"><code class="md-code-inline">PrivacyBudget</code></a> and satisfy (ε, δ)-differential privacy. Public engines reject a budget rather than silently ignoring it.</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">budget = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
+model  = fit(MSTGenerator(), df; privacy = budget)</code></pre>
+</div>
+<p><code class="md-code-inline">δ</code> defaults to <code class="md-code-inline">1e-5</code>. Smaller <code class="md-code-inline">ε</code> means more privacy and less utility.</p>
+<h2 id="What-the-budget-covers" class="md-heading">What the budget covers<a href="#What-the-budget-covers" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>Each private engine spends its whole budget internally and composes the pieces using zero-concentrated differential privacy (zCDP), which converts to (ε, δ)-DP at the end.</p>
+<ul class="md-list-tight">
+<li><p><strong><code class="md-code-inline">MSTGenerator</code></strong> splits the budget across selecting the tree, measuring the one-way marginals, and measuring the selected two-way marginals. Reconciling those measurements is post-processing and costs nothing further.</p>
+</li>
+<li><p><strong><code class="md-code-inline">DPCopulaGenerator</code></strong> splits between the histogram marginals and the private covariance matrix.</p>
+</li>
+<li><p><strong><code class="md-code-inline">DiffusionGenerator(dp = true)</code></strong> trains with DP-SGD — per-example gradient clipping plus Gaussian noise — accounted with Rényi DP over Poisson-subsampled minibatches.</p>
+</li>
+</ul>
+<p>Sampling from a fitted private model is post-processing: draw as many synthetic rows as you like without spending more budget.</p>
+<h2 id="Choosing-ε" class="md-heading">Choosing ε<a href="#Choosing-ε" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>There is no universally correct value. As a rough guide, ε below 1 is conservative, 1–3 is a common working range, and above 8 offers weak formal protection. Measure rather than guess:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">using DataMimic
 
 results = privacy_utility_sweep(
     MSTGenerator(), df, [0.5, 1.0, 2.0, 4.0, 8.0],
     (real, synth) -&gt; fidelity_score(real, synth).aggregate,
-)</code></pre><p>Benchmarks at low ε are noisy. On Adult at ε = 0.5, the train-on-synthetic utility ratio has a seed-to-seed standard deviation of about 0.06 — larger than most differences worth acting on. Compare distributions over several seeds rather than two single runs.</p><h2 id="What-differential-privacy-does-not-give-you"><a class="docs-heading-anchor" href="#What-differential-privacy-does-not-give-you">What differential privacy does not give you</a><a id="What-differential-privacy-does-not-give-you-1"></a><a class="docs-heading-anchor-permalink" href="#What-differential-privacy-does-not-give-you" title="Permalink"></a></h2><p>A budget bounds what can be inferred about any single record&#39;s presence. It does not make synthetic data unconditionally safe to publish, and it says nothing about whether the <em>aggregate</em> patterns you release are sensitive. Use <a href="../api/#DataMimic.Evaluate.privacy_dcr"><code>privacy_dcr</code></a> as a sanity check on how close synthetic rows sit to real ones, but treat it as a smoke test rather than a guarantee — a good DCR does not substitute for a formal budget, and a formal budget does not require a good DCR.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../engines/">« Engines</a><a class="docs-footer-nextpage" href="../evaluation/">Evaluation »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Monday 31 August 2026 02:29">Monday 31 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+)</code></pre>
+</div>
+<p>Benchmarks at low ε are noisy. On Adult at ε = 0.5, the train-on-synthetic utility ratio has a seed-to-seed standard deviation of about 0.06 — larger than most differences worth acting on. Compare distributions over several seeds rather than two single runs.</p>
+<h2 id="What-differential-privacy-does-not-give-you" class="md-heading">What differential privacy does not give you<a href="#What-differential-privacy-does-not-give-you" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>A budget bounds what can be inferred about any single record&#39;s presence. It does not make synthetic data unconditionally safe to publish, and it says nothing about whether the <em>aggregate</em> patterns you release are sensitive. Use <a href="../api/#DataMimic.Evaluate.privacy_dcr"><code class="md-code-inline">privacy_dcr</code></a> as a sanity check on how close synthetic rows sit to real ones, but treat it as a smoke test rather than a guarantee — a good DCR does not substitute for a formal budget, and a formal budget does not require a good DCR.</p>
+      </article>
+      <footer class="md-footer">
+        <p>Built with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and <a href="https://github.com/mthelm85/MaterialDocs.jl">MaterialDocs.jl</a></p>
+      </footer>
+    </main>
+    <aside class="md-toc">
+      <div class="md-toc-inner">
+        <p class="md-toc-title">On this page</p>
+          <a class="md-toc-link md-toc-h2" href="#What-the-budget-covers">What the budget covers</a>
+          <a class="md-toc-link md-toc-h2" href="#Choosing-ε">Choosing ε</a>
+          <a class="md-toc-link md-toc-h2" href="#What-differential-privacy-does-not-give-you">What differential privacy does not give you</a>
+      </div>
+    </aside>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia-repl.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <script src="../assets/materialdocs.js?v=c111173e"></script>
+</body>
+</html>

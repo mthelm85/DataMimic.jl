@@ -1,17 +1,538 @@
-<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>API · DataMimic.jl</title><meta name="title" content="API · DataMimic.jl"/><meta property="og:title" content="API · DataMimic.jl"/><meta property="twitter:title" content="API · DataMimic.jl"/><meta name="description" content="Documentation for DataMimic.jl."/><meta property="og:description" content="Documentation for DataMimic.jl."/><meta property="twitter:description" content="Documentation for DataMimic.jl."/><meta property="og:url" content="https://mthelm85.github.io/DataMimic.jl/api/"/><meta property="twitter:url" content="https://mthelm85.github.io/DataMimic.jl/api/"/><link rel="canonical" href="https://mthelm85.github.io/DataMimic.jl/api/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.png" alt="DataMimic.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">DataMimic.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../engines/">Engines</a></li><li><a class="tocitem" href="../privacy/">Privacy</a></li><li><a class="tocitem" href="../evaluation/">Evaluation</a></li><li class="is-active"><a class="tocitem" href>API</a><ul class="internal"><li><a class="tocitem" href="#Fitting-and-sampling"><span>Fitting and sampling</span></a></li><li><a class="tocitem" href="#Generators"><span>Generators</span></a></li><li><a class="tocitem" href="#Fitted-models"><span>Fitted models</span></a></li><li><a class="tocitem" href="#Configuration"><span>Configuration</span></a></li><li><a class="tocitem" href="#Persistence"><span>Persistence</span></a></li><li><a class="tocitem" href="#Evaluation"><span>Evaluation</span></a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>API</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>API</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/mthelm85/DataMimic.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/mthelm85/DataMimic.jl/blob/main/docs/src/api.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="API-Reference"><a class="docs-heading-anchor" href="#API-Reference">API Reference</a><a id="API-Reference-1"></a><a class="docs-heading-anchor-permalink" href="#API-Reference" title="Permalink"></a></h1><h2 id="Fitting-and-sampling"><a class="docs-heading-anchor" href="#Fitting-and-sampling">Fitting and sampling</a><a id="Fitting-and-sampling-1"></a><a class="docs-heading-anchor-permalink" href="#Fitting-and-sampling" title="Permalink"></a></h2><article><details class="docstring" open="true"><summary id="DataMimic.fit"><a class="docstring-binding" href="#DataMimic.fit"><code>DataMimic.fit</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">fit(generator::AbstractGenerator, table; kw...) -&gt; AbstractFittedModel</code></pre><p>Fit a synthetic data model to <code>table</code> using the specified generator.</p><p><strong>Keywords</strong></p><ul><li><code>privacy::Union{Nothing, PrivacyBudget}=nothing</code> — required for private generators</li><li><code>hints::Vector{ColumnHint}=ColumnHint[]</code> — column type overrides</li><li><code>identifiers::Vector{Symbol}=Symbol[]</code> — columns to exclude from the model</li><li><code>fill=Dict{Symbol,FillSpec}()</code> — fill specs for identifier columns in output</li><li><code>rng::AbstractRNG=Random.default_rng()</code> — random number generator</li></ul></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/fit.jl#L33-L44">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.sample"><a class="docstring-binding" href="#DataMimic.sample"><code>DataMimic.sample</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">sample(model::FittedCopulaModel, n::Int; rng=model.rng) -&gt; table</code></pre><p>Generate <code>n</code> synthetic rows from a fitted copula model. Returns the same table type as the original input (via <code>Tables.materializer</code>).</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/sample.jl#L93-L98">source</a></section><section><div><pre><code class="language-julia hljs">sample(model::FittedMSTModel, n::Int; rng=model.rng) -&gt; table</code></pre><p>Generate <code>n</code> synthetic rows from a fitted MST model. Samples from the tree-structured joint distribution and un-discretizes back to the original domain.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/sample.jl#L172-L178">source</a></section><section><div><pre><code class="language-julia hljs">sample(model::FittedDPCopulaModel, n::Int; rng=model.rng) -&gt; table</code></pre><p>Generate <code>n</code> synthetic rows from a fitted DP-copula model. Uses the private Gaussian copula for numeric columns and noisy categoricals.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/sample.jl#L228-L233">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.synthesize"><a class="docstring-binding" href="#DataMimic.synthesize"><code>DataMimic.synthesize</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">synthesize(generator, table, n; kw...) -&gt; table</code></pre><p>Equivalent to <code>sample(fit(generator, table; kw...), n)</code>.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/sample.jl#L290-L294">source</a></section></details></article><h2 id="Generators"><a class="docs-heading-anchor" href="#Generators">Generators</a><a id="Generators-1"></a><a class="docs-heading-anchor-permalink" href="#Generators" title="Permalink"></a></h2><article><details class="docstring" open="true"><summary id="DataMimic.CopulaGenerator"><a class="docstring-binding" href="#DataMimic.CopulaGenerator"><code>DataMimic.CopulaGenerator</code></a> — <span class="docstring-category">Type</span></summary><section><div><pre><code class="language-julia hljs">CopulaGenerator(copula_type::Symbol=:beta)</code></pre><p>Public (non-private) copula-based synthetic data generator. <code>copula_type</code> must be <code>:beta</code> or <code>:gaussian</code>.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/types.jl#L30-L35">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.DiffusionGenerator"><a class="docstring-binding" href="#DataMimic.DiffusionGenerator"><code>DataMimic.DiffusionGenerator</code></a> — <span class="docstring-category">Type</span></summary><section><div><pre><code class="language-julia hljs">DiffusionGenerator(; dp=false, epochs=100, batch_size=512, target=nothing)</code></pre><p>TabDDPM [Kotelnikov et al. 2023] with optional DP-SGD.  Requires the <code>LuxExt</code> package extension (<code>using Lux, Zygote</code> before calling <code>fit</code>).</p><p>Architecture and training follow the reference implementation: a plain MLP denoiser (<code>Linear → ReLU → Dropout</code> blocks) with additive sinusoidal timestep conditioning, a cosine β schedule, Gaussian diffusion on numeric features and multinomial diffusion on categoricals, AdamW with linear learning-rate annealing, and an exponential moving average of the denoiser weights used for sampling.</p><p><strong>Keyword arguments</strong></p><ul><li><code>target</code>: name of the label column for class-conditional generation (the paper&#39;s <code>is_y_cond=true</code>).  When set, the denoiser is conditioned on an embedding of the label and sampling first draws labels from the empirical class distribution.  When <code>nothing</code>, the model is unconditional and the label, if any, is modelled as an ordinary categorical column.</li><li><code>hidden_dim</code>: width of each MLP block (0 = auto).</li><li><code>n_blocks</code>: number of MLP blocks.</li><li><code>d_layers</code>: explicit per-layer widths, e.g. <code>[256, 1024, 1024, 256]</code>.  When non-empty this overrides <code>hidden_dim</code>/<code>n_blocks</code>, matching the paper&#39;s per-dataset tuned architectures.</li><li><code>num_timesteps</code>: length of the diffusion process (the paper tunes this; its Adult configuration uses 100).</li><li><code>embed_dim</code>: timestep-embedding width (the paper&#39;s <code>dim_t</code>).</li><li><code>lr</code>, <code>weight_decay</code>: AdamW parameters.</li><li><code>lr_warmup</code>: linear warmup epochs prepended to the annealing schedule (0 = the paper&#39;s plain linear anneal).</li><li><code>ema_decay</code>: EMA rate for the sampling weights (0 disables EMA).</li></ul></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/types.jl#L83-L114">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.MSTGenerator"><a class="docstring-binding" href="#DataMimic.MSTGenerator"><code>DataMimic.MSTGenerator</code></a> — <span class="docstring-category">Type</span></summary><section><div><pre><code class="language-julia hljs">MSTGenerator(max_marginal_order::Int=2)</code></pre><p>Private synthetic data via MST (McKenna et al. 2021): measure all 1-way marginals → select a spanning tree with the exponential mechanism → measure the selected 2-way marginals → reconcile every measurement with Private-PGM (McKenna et al. 2019) → sample ancestrally from the resulting conditionals. Satisfies (ε,δ)-DP via zCDP composition; the reconciliation step is post-processing and costs no budget.</p><p>Domain compression (merging low-count bins before selection) is the one part of the published algorithm not implemented; see the note under REQ-MST-007 in REQUIREMENTS.md.</p><p><code>max_marginal_order = 3</code> is accepted but not implemented — it warns and falls back to 2-way marginals.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/types.jl#L47-L63">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.DPCopulaGenerator"><a class="docstring-binding" href="#DataMimic.DPCopulaGenerator"><code>DataMimic.DPCopulaGenerator</code></a> — <span class="docstring-category">Type</span></summary><section><div><pre><code class="language-julia hljs">DPCopulaGenerator()</code></pre><p>DP-noisy histogram marginals + private covariance Gaussian copula. Suited for continuous-heavy tables under moderate ε.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/types.jl#L75-L80">source</a></section></details></article><h2 id="Fitted-models"><a class="docs-heading-anchor" href="#Fitted-models">Fitted models</a><a id="Fitted-models-1"></a><a class="docs-heading-anchor-permalink" href="#Fitted-models" title="Permalink"></a></h2><p><code>fit</code> returns one of these, depending on the generator. Pass it to <a href="#DataMimic.sample"><code>sample</code></a>, or persist it with <a href="#DataMimic.save"><code>save</code></a>.</p><article><details class="docstring" open="true"><summary id="DataMimic.FittedCopulaModel"><a class="docstring-binding" href="#DataMimic.FittedCopulaModel"><code>DataMimic.FittedCopulaModel</code></a> — <span class="docstring-category">Type</span></summary><section><div><pre><code class="language-julia hljs">FittedCopulaModel &lt;: AbstractFittedModel</code></pre><p>Result of fitting a <code>CopulaGenerator</code>. Contains all information needed to sample synthetic data.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/types.jl#L199-L204">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.FittedMSTModel"><a class="docstring-binding" href="#DataMimic.FittedMSTModel"><code>DataMimic.FittedMSTModel</code></a> — <span class="docstring-category">Type</span></summary><section><div><pre><code class="language-julia hljs">FittedMSTModel &lt;: AbstractFittedModel</code></pre><p>Result of fitting an <code>MSTGenerator</code>.  Stores discretization metadata, a spanning-tree structure, and noisy conditional distributions for sampling.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/types.jl#L251-L256">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.FittedDPCopulaModel"><a class="docstring-binding" href="#DataMimic.FittedDPCopulaModel"><code>DataMimic.FittedDPCopulaModel</code></a> — <span class="docstring-category">Type</span></summary><section><div><pre><code class="language-julia hljs">FittedDPCopulaModel &lt;: AbstractFittedModel</code></pre><p>Result of fitting a <code>DPCopulaGenerator</code>.  DP-noisy histogram marginals with an optional private-covariance Gaussian copula.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/types.jl#L277-L282">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.FittedDiffusionModel"><a class="docstring-binding" href="#DataMimic.FittedDiffusionModel"><code>DataMimic.FittedDiffusionModel</code></a> — <span class="docstring-category">Type</span></summary><section><div><pre><code class="language-julia hljs">FittedDiffusionModel &lt;: AbstractFittedModel</code></pre><p>Result of fitting a <code>DiffusionGenerator</code>.  Stores the trained Lux model (TabDDPM), preprocessing metadata, and diffusion schedule.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/types.jl#L299-L304">source</a></section></details></article><h2 id="Configuration"><a class="docs-heading-anchor" href="#Configuration">Configuration</a><a id="Configuration-1"></a><a class="docs-heading-anchor-permalink" href="#Configuration" title="Permalink"></a></h2><article><details class="docstring" open="true"><summary id="DataMimic.PrivacyBudget"><a class="docstring-binding" href="#DataMimic.PrivacyBudget"><code>DataMimic.PrivacyBudget</code></a> — <span class="docstring-category">Type</span></summary><section><div><pre><code class="language-julia hljs">PrivacyBudget(; epsilon, delta=1e-5)</code></pre><p>Differential privacy parameters used by private generators (<code>MSTGenerator</code>, <code>DPCopulaGenerator</code>, <code>DiffusionGenerator(dp=true)</code>).</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/types.jl#L11-L16">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.ColumnHint"><a class="docstring-binding" href="#DataMimic.ColumnHint"><code>DataMimic.ColumnHint</code></a> — <span class="docstring-category">Type</span></summary><section><div><pre><code class="language-julia hljs">ColumnHint(; name, kind, levels=nothing)</code></pre><p>Override auto-detected column type. <code>kind</code> must be one of: <code>:continuous</code>, <code>:integer</code>, <code>:categorical</code>, <code>:binary</code>, <code>:constant</code>, <code>:identifier</code>.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/types.jl#L155-L160">source</a></section></details></article><h2 id="Persistence"><a class="docs-heading-anchor" href="#Persistence">Persistence</a><a id="Persistence-1"></a><a class="docs-heading-anchor-permalink" href="#Persistence" title="Permalink"></a></h2><article><details class="docstring" open="true"><summary id="DataMimic.save"><a class="docstring-binding" href="#DataMimic.save"><code>DataMimic.save</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">DataMimic.save(path::AbstractString, model::AbstractFittedModel)</code></pre><p>Serialize a fitted model to disk with a version header.</p><p><strong>Note:</strong> if a <code>fill</code> spec contains a <code>Function</code>, it is serialized via Julia&#39;s <code>Serialization</code> module. Anonymous functions round-trip correctly within the same Julia version but may fail across versions.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/serialize.jl#L5-L13">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.load"><a class="docstring-binding" href="#DataMimic.load"><code>DataMimic.load</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">DataMimic.load(path::AbstractString) -&gt; AbstractFittedModel</code></pre><p>Deserialize a fitted model from disk. Throws if the file was saved with an incompatible DataMimic version.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/serialize.jl#L22-L27">source</a></section></details></article><h2 id="Evaluation"><a class="docs-heading-anchor" href="#Evaluation">Evaluation</a><a id="Evaluation-1"></a><a class="docs-heading-anchor-permalink" href="#Evaluation" title="Permalink"></a></h2><article><details class="docstring" open="true"><summary id="DataMimic.Evaluate.compare"><a class="docstring-binding" href="#DataMimic.Evaluate.compare"><code>DataMimic.Evaluate.compare</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">compare(generators, table; metrics, n, n_seeds, privacy, ...) -&gt; Vector{NamedTuple}</code></pre><p>Fit each generator to <code>table</code>, sample from it, and score the result with each metric.  Returns one row per generator × metric, carrying the mean and standard deviation across seeds and the mean fit time.</p><p>The result is a <code>Vector{NamedTuple}</code>, which is already a Tables.jl table — pass it to <code>DataFrame</code> to sort or pivot.</p><p><strong>Arguments</strong></p><ul><li><code>generators</code>: the generators to compare.  Entries may also be <code>&quot;label&quot; =&gt; generator</code> to name a row explicitly; otherwise labels are derived from the type and, for single-field generators, the field value.</li></ul><p><strong>Keywords</strong></p><ul><li><code>metrics</code>: a <code>NamedTuple</code> of <code>name =&gt; f(real, synth)</code>.  Each function returns a number, or a <code>NamedTuple</code> from which a scalar is taken (see <code>metric_field</code>). Defaults to aggregate fidelity and median DCR.</li><li><code>metric_field = :aggregate</code>: which field to read when a metric returns a <code>NamedTuple</code>.  Falls back to <code>:ratio</code>, <code>:median</code>, <code>:mean</code>, <code>:score</code>.</li><li><code>n = nothing</code>: rows to sample from each fitted model (default: as many as <code>table</code> has).</li><li><code>n_seeds = 3</code>: how many times to repeat each fit and sample.  Fewer than 3 makes the reported standard deviation meaningless.</li><li><code>privacy = nothing</code>: budget for private generators.  Public generators are fitted without one, so a mixed list works in a single call.</li><li><code>hints</code>, <code>identifiers</code>, <code>fill</code>: forwarded to <code>fit</code>.</li><li><code>rng</code>: seeds derive from this, so a run is reproducible.</li></ul><p><strong>Failure handling</strong></p><p>A generator that fails on every seed is reported with <code>ok = false</code> and its error message, and the comparison continues with the others.  Partial failures are counted in <code>n_failed</code>, and the seeds that succeeded are still summarised.</p><p><strong>On subsampling</strong></p><p><code>compare</code> never fits on a subsample of <code>table</code>, however large it is.  Engines respond differently to row count: a differentially private engine at fixed ε improves substantially with more rows, because its noise is fixed while the signal grows.  Fitting on a subsample can therefore reverse the very ranking the comparison exists to establish.  Subsample deliberately before calling if you want speed, and read the result as being about that smaller dataset.</p><p><strong>Example</strong></p><pre><code class="language-julia hljs">compare([CopulaGenerator(), CopulaGenerator(:gaussian)], df;
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Reference — DataMimic.jl</title>
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=ba0d6399">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="icon" href="../assets/favicon.png">
+  <script>
+    (function(){
+      document.documentElement.classList.add('no-transition');
+      window.addEventListener('load',function(){setTimeout(function(){document.documentElement.classList.remove('no-transition');},50);});
+    })()
+  </script>
+</head>
+<body>
+  <header class="md-navbar">
+    <button id="md-hamburger" class="md-hamburger" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <img class="md-navbar-logo" src="../assets/logo.png" alt="DataMimic.jl logo" height="32">
+    <span class="md-navbar-title">DataMimic.jl</span>
+    <span style="flex:1"></span>
+    <button id="md-search-btn" class="md-icon-btn" title="Search (Ctrl+K)" aria-label="Search documentation">🔍</button>
+  </header>
+  <div class="md-layout">
+    <nav class="md-sidebar">
+      <a href="../">Home</a>
+      <a href="../engines/">Engines</a>
+      <a href="../privacy/">Privacy</a>
+      <a href="../evaluation/">Evaluation</a>
+      <a href="../api/">API</a>
+    </nav>
+    <main class="md-content">
+      <article class="md-article">
+<h1 id="API-Reference" class="md-heading">API Reference<a href="#API-Reference" class="md-heading-anchor" aria-label="Link to this section">#</a></h1>
+<h2 id="Fitting-and-sampling" class="md-heading">Fitting and sampling<a href="#Fitting-and-sampling" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-docstring" id="DataMimic.fit">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.fit</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/fit.jl#L33-L44" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">fit(generator::AbstractGenerator, table; kw...) -&gt; AbstractFittedModel</code></pre>
+</div>
+<p>Fit a synthetic data model to <code class="md-code-inline">table</code> using the specified generator.</p>
+<p><strong>Keywords</strong></p>
+<ul class="md-list-tight">
+<li><p><code class="md-code-inline">privacy::Union{Nothing, PrivacyBudget}=nothing</code> — required for private generators</p>
+</li>
+<li><p><code class="md-code-inline">hints::Vector{ColumnHint}=ColumnHint[]</code> — column type overrides</p>
+</li>
+<li><p><code class="md-code-inline">identifiers::Vector{Symbol}=Symbol[]</code> — columns to exclude from the model</p>
+</li>
+<li><p><code class="md-code-inline">fill=Dict{Symbol,FillSpec}()</code> — fill specs for identifier columns in output</p>
+</li>
+<li><p><code class="md-code-inline">rng::AbstractRNG=Random.default_rng()</code> — random number generator</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.sample">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.sample</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/sample.jl#L93-L98" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">sample(model::FittedCopulaModel, n::Int; rng=model.rng) -&gt; table</code></pre>
+</div>
+<p>Generate <code class="md-code-inline">n</code> synthetic rows from a fitted copula model. Returns the same table type as the original input (via <code class="md-code-inline">Tables.materializer</code>).</p>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">sample(model::FittedMSTModel, n::Int; rng=model.rng) -&gt; table</code></pre>
+</div>
+<p>Generate <code class="md-code-inline">n</code> synthetic rows from a fitted MST model. Samples from the tree-structured joint distribution and un-discretizes back to the original domain.</p>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">sample(model::FittedDPCopulaModel, n::Int; rng=model.rng) -&gt; table</code></pre>
+</div>
+<p>Generate <code class="md-code-inline">n</code> synthetic rows from a fitted DP-copula model. Uses the private Gaussian copula for numeric columns and noisy categoricals.</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.synthesize">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.synthesize</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/sample.jl#L290-L294" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">synthesize(generator, table, n; kw...) -&gt; table</code></pre>
+</div>
+<p>Equivalent to <code class="md-code-inline">sample(fit(generator, table; kw...), n)</code>.</p>
+</div>
+</div>
+<h2 id="Generators" class="md-heading">Generators<a href="#Generators" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-docstring" id="DataMimic.CopulaGenerator">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.CopulaGenerator</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L30-L35" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">CopulaGenerator(copula_type::Symbol=:beta)</code></pre>
+</div>
+<p>Public (non-private) copula-based synthetic data generator. <code class="md-code-inline">copula_type</code> must be <code class="md-code-inline">:beta</code> or <code class="md-code-inline">:gaussian</code>.</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.DiffusionGenerator">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.DiffusionGenerator</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L83-L114" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">DiffusionGenerator(; dp=false, epochs=100, batch_size=512, target=nothing)</code></pre>
+</div>
+<p>TabDDPM [Kotelnikov et al. 2023] with optional DP-SGD.  Requires the <code class="md-code-inline">LuxExt</code> package extension (<code class="md-code-inline">using Lux, Zygote</code> before calling <code class="md-code-inline">fit</code>).</p>
+<p>Architecture and training follow the reference implementation: a plain MLP denoiser (<code class="md-code-inline">Linear → ReLU → Dropout</code> blocks) with additive sinusoidal timestep conditioning, a cosine β schedule, Gaussian diffusion on numeric features and multinomial diffusion on categoricals, AdamW with linear learning-rate annealing, and an exponential moving average of the denoiser weights used for sampling.</p>
+<p><strong>Keyword arguments</strong></p>
+<ul class="md-list-tight">
+<li><p><code class="md-code-inline">target</code>: name of the label column for class-conditional generation (the paper&#39;s <code class="md-code-inline">is_y_cond=true</code>).  When set, the denoiser is conditioned on an embedding of the label and sampling first draws labels from the empirical class distribution.  When <code class="md-code-inline">nothing</code>, the model is unconditional and the label, if any, is modelled as an ordinary categorical column.</p>
+</li>
+<li><p><code class="md-code-inline">hidden_dim</code>: width of each MLP block (0 = auto).</p>
+</li>
+<li><p><code class="md-code-inline">n_blocks</code>: number of MLP blocks.</p>
+</li>
+<li><p><code class="md-code-inline">d_layers</code>: explicit per-layer widths, e.g. <code class="md-code-inline">[256, 1024, 1024, 256]</code>.  When non-empty this overrides <code class="md-code-inline">hidden_dim</code>/<code class="md-code-inline">n_blocks</code>, matching the paper&#39;s per-dataset tuned architectures.</p>
+</li>
+<li><p><code class="md-code-inline">num_timesteps</code>: length of the diffusion process (the paper tunes this; its Adult configuration uses 100).</p>
+</li>
+<li><p><code class="md-code-inline">embed_dim</code>: timestep-embedding width (the paper&#39;s <code class="md-code-inline">dim_t</code>).</p>
+</li>
+<li><p><code class="md-code-inline">lr</code>, <code class="md-code-inline">weight_decay</code>: AdamW parameters.</p>
+</li>
+<li><p><code class="md-code-inline">lr_warmup</code>: linear warmup epochs prepended to the annealing schedule (0 = the paper&#39;s plain linear anneal).</p>
+</li>
+<li><p><code class="md-code-inline">ema_decay</code>: EMA rate for the sampling weights (0 disables EMA).</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.MSTGenerator">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.MSTGenerator</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L47-L63" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">MSTGenerator(max_marginal_order::Int=2)</code></pre>
+</div>
+<p>Private synthetic data via MST (McKenna et al. 2021): measure all 1-way marginals → select a spanning tree with the exponential mechanism → measure the selected 2-way marginals → reconcile every measurement with Private-PGM (McKenna et al. 2019) → sample ancestrally from the resulting conditionals. Satisfies (ε,δ)-DP via zCDP composition; the reconciliation step is post-processing and costs no budget.</p>
+<p>Domain compression (merging low-count bins before selection) is the one part of the published algorithm not implemented; see the note under REQ-MST-007 in REQUIREMENTS.md.</p>
+<p><code class="md-code-inline">max_marginal_order = 3</code> is accepted but not implemented — it warns and falls back to 2-way marginals.</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.DPCopulaGenerator">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.DPCopulaGenerator</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L75-L80" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">DPCopulaGenerator()</code></pre>
+</div>
+<p>DP-noisy histogram marginals + private covariance Gaussian copula. Suited for continuous-heavy tables under moderate ε.</p>
+</div>
+</div>
+<h2 id="Fitted-models" class="md-heading">Fitted models<a href="#Fitted-models" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p><code class="md-code-inline">fit</code> returns one of these, depending on the generator. Pass it to <a href="../api/#DataMimic.sample"><code class="md-code-inline">sample</code></a>, or persist it with <a href="../api/#DataMimic.save"><code class="md-code-inline">save</code></a>.</p>
+<div class="md-docstring" id="DataMimic.FittedCopulaModel">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.FittedCopulaModel</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L199-L204" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">FittedCopulaModel &lt;: AbstractFittedModel</code></pre>
+</div>
+<p>Result of fitting a <code class="md-code-inline">CopulaGenerator</code>. Contains all information needed to sample synthetic data.</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.FittedMSTModel">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.FittedMSTModel</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L251-L256" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">FittedMSTModel &lt;: AbstractFittedModel</code></pre>
+</div>
+<p>Result of fitting an <code class="md-code-inline">MSTGenerator</code>.  Stores discretization metadata, a spanning-tree structure, and noisy conditional distributions for sampling.</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.FittedDPCopulaModel">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.FittedDPCopulaModel</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L277-L282" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">FittedDPCopulaModel &lt;: AbstractFittedModel</code></pre>
+</div>
+<p>Result of fitting a <code class="md-code-inline">DPCopulaGenerator</code>.  DP-noisy histogram marginals with an optional private-covariance Gaussian copula.</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.FittedDiffusionModel">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.FittedDiffusionModel</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L299-L304" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">FittedDiffusionModel &lt;: AbstractFittedModel</code></pre>
+</div>
+<p>Result of fitting a <code class="md-code-inline">DiffusionGenerator</code>.  Stores the trained Lux model (TabDDPM), preprocessing metadata, and diffusion schedule.</p>
+</div>
+</div>
+<h2 id="Configuration" class="md-heading">Configuration<a href="#Configuration" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-docstring" id="DataMimic.PrivacyBudget">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.PrivacyBudget</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L11-L16" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">PrivacyBudget(; epsilon, delta=1e-5)</code></pre>
+</div>
+<p>Differential privacy parameters used by private generators (<code class="md-code-inline">MSTGenerator</code>, <code class="md-code-inline">DPCopulaGenerator</code>, <code class="md-code-inline">DiffusionGenerator(dp=true)</code>).</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.ColumnHint">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.ColumnHint</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L155-L160" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">ColumnHint(; name, kind, levels=nothing)</code></pre>
+</div>
+<p>Override auto-detected column type. <code class="md-code-inline">kind</code> must be one of: <code class="md-code-inline">:continuous</code>, <code class="md-code-inline">:integer</code>, <code class="md-code-inline">:categorical</code>, <code class="md-code-inline">:binary</code>, <code class="md-code-inline">:constant</code>, <code class="md-code-inline">:identifier</code>.</p>
+</div>
+</div>
+<h2 id="Persistence" class="md-heading">Persistence<a href="#Persistence" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-docstring" id="DataMimic.save">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.save</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/serialize.jl#L10-L18" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">DataMimic.save(path::AbstractString, model::AbstractFittedModel)</code></pre>
+</div>
+<p>Serialize a fitted model to disk with a version header.</p>
+<p><strong>Note:</strong> if a <code class="md-code-inline">fill</code> spec contains a <code class="md-code-inline">Function</code>, it is serialized via Julia&#39;s <code class="md-code-inline">Serialization</code> module. Anonymous functions round-trip correctly within the same Julia version but may fail across versions.</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.load">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.load</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/serialize.jl#L27-L33" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">DataMimic.load(path::AbstractString) -&gt; AbstractFittedModel</code></pre>
+</div>
+<p>Deserialize a fitted model from disk. Throws if the file was saved in an incompatible model format. The format version is independent of the package version; see <code class="md-code-inline">DATAMIMIC_SERIAL_VERSION</code>.</p>
+</div>
+</div>
+<h2 id="Evaluation" class="md-heading">Evaluation<a href="#Evaluation" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-docstring" id="DataMimic.Evaluate.compare">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.Evaluate.compare</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/compare.jl#L18-L68" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">compare(generators, table; metrics, n, n_seeds, privacy, ...) -&gt; Vector{NamedTuple}</code></pre>
+</div>
+<p>Fit each generator to <code class="md-code-inline">table</code>, sample from it, and score the result with each metric.  Returns one row per generator × metric, carrying the mean and standard deviation across seeds and the mean fit time.</p>
+<p>The result is a <code class="md-code-inline">Vector{NamedTuple}</code>, which is already a Tables.jl table — pass it to <code class="md-code-inline">DataFrame</code> to sort or pivot.</p>
+<p><strong>Arguments</strong></p>
+<ul class="md-list-tight">
+<li><p><code class="md-code-inline">generators</code>: the generators to compare.  Entries may also be <code class="md-code-inline">&quot;label&quot; =&gt; generator</code> to name a row explicitly; otherwise labels are derived from the type and, for single-field generators, the field value.</p>
+</li>
+</ul>
+<p><strong>Keywords</strong></p>
+<ul class="md-list-tight">
+<li><p><code class="md-code-inline">metrics</code>: a <code class="md-code-inline">NamedTuple</code> of <code class="md-code-inline">name =&gt; f(real, synth)</code>.  Each function returns a number, or a <code class="md-code-inline">NamedTuple</code> from which a scalar is taken (see <code class="md-code-inline">metric_field</code>). Defaults to aggregate fidelity and median DCR.</p>
+</li>
+<li><p><code class="md-code-inline">metric_field = :aggregate</code>: which field to read when a metric returns a <code class="md-code-inline">NamedTuple</code>.  Falls back to <code class="md-code-inline">:ratio</code>, <code class="md-code-inline">:median</code>, <code class="md-code-inline">:mean</code>, <code class="md-code-inline">:score</code>.</p>
+</li>
+<li><p><code class="md-code-inline">n = nothing</code>: rows to sample from each fitted model (default: as many as <code class="md-code-inline">table</code> has).</p>
+</li>
+<li><p><code class="md-code-inline">n_seeds = 3</code>: how many times to repeat each fit and sample.  Fewer than 3 makes the reported standard deviation meaningless.</p>
+</li>
+<li><p><code class="md-code-inline">privacy = nothing</code>: budget for private generators.  Public generators are fitted without one, so a mixed list works in a single call.</p>
+</li>
+<li><p><code class="md-code-inline">hints</code>, <code class="md-code-inline">identifiers</code>, <code class="md-code-inline">fill</code>: forwarded to <code class="md-code-inline">fit</code>.</p>
+</li>
+<li><p><code class="md-code-inline">rng</code>: seeds derive from this, so a run is reproducible.</p>
+</li>
+</ul>
+<p><strong>Failure handling</strong></p>
+<p>A generator that fails on every seed is reported with <code class="md-code-inline">ok = false</code> and its error message, and the comparison continues with the others.  Partial failures are counted in <code class="md-code-inline">n_failed</code>, and the seeds that succeeded are still summarised.</p>
+<p><strong>On subsampling</strong></p>
+<p><code class="md-code-inline">compare</code> never fits on a subsample of <code class="md-code-inline">table</code>, however large it is.  Engines respond differently to row count: a differentially private engine at fixed ε improves substantially with more rows, because its noise is fixed while the signal grows.  Fitting on a subsample can therefore reverse the very ranking the comparison exists to establish.  Subsample deliberately before calling if you want speed, and read the result as being about that smaller dataset.</p>
+<p><strong>Example</strong></p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">compare([CopulaGenerator(), CopulaGenerator(:gaussian)], df;
         metrics = (fidelity = fidelity_score,
                    utility  = (r, s) -&gt; utility_tstr(r, s, :income).ratio),
-        n_seeds = 5)</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/evaluate/compare.jl#L18-L68">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.Evaluate.fidelity_score"><a class="docstring-binding" href="#DataMimic.Evaluate.fidelity_score"><code>DataMimic.Evaluate.fidelity_score</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">fidelity_score(real, synth) -&gt; NamedTuple</code></pre><p>Evaluate distributional fidelity of synthetic data vs. real data.</p><p>Returns a <code>NamedTuple</code> with:</p><ul><li><code>column_scores</code>: Dict mapping column name → per-column score (KS or TVD)</li><li><code>column_metrics</code>: Dict mapping column name → metric name (<code>:ks</code> or <code>:tvd</code>)</li><li><code>correlation_score</code>: Frobenius norm of Spearman correlation difference</li><li><code>aggregate</code>: weighted mean of per-column mean and correlation score</li><li><code>correlation_columns</code>: numeric columns actually used for the correlation</li><li><code>correlation_excluded</code>: numeric columns dropped from the correlation because they have fewer than two distinct finite values in <code>real</code> or in <code>synth</code></li></ul><p>All scores are in [0, 1] where 0 is perfect fidelity.</p><p>Columns with no variance are still scored individually — only the correlation term skips them, since a constant column has no ranks to correlate.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/evaluate/fidelity.jl#L127-L145">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.Evaluate.utility_tstr"><a class="docstring-binding" href="#DataMimic.Evaluate.utility_tstr"><code>DataMimic.Evaluate.utility_tstr</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">utility_tstr(real, synth, target::Symbol;
+        n_seeds = 5)</code></pre>
+</div>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.Evaluate.fidelity_score">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.Evaluate.fidelity_score</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/fidelity.jl#L127-L145" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">fidelity_score(real, synth) -&gt; NamedTuple</code></pre>
+</div>
+<p>Evaluate distributional fidelity of synthetic data vs. real data.</p>
+<p>Returns a <code class="md-code-inline">NamedTuple</code> with:</p>
+<ul class="md-list-tight">
+<li><p><code class="md-code-inline">column_scores</code>: Dict mapping column name → per-column score (KS or TVD)</p>
+</li>
+<li><p><code class="md-code-inline">column_metrics</code>: Dict mapping column name → metric name (<code class="md-code-inline">:ks</code> or <code class="md-code-inline">:tvd</code>)</p>
+</li>
+<li><p><code class="md-code-inline">correlation_score</code>: Frobenius norm of Spearman correlation difference</p>
+</li>
+<li><p><code class="md-code-inline">aggregate</code>: weighted mean of per-column mean and correlation score</p>
+</li>
+<li><p><code class="md-code-inline">correlation_columns</code>: numeric columns actually used for the correlation</p>
+</li>
+<li><p><code class="md-code-inline">correlation_excluded</code>: numeric columns dropped from the correlation because they have fewer than two distinct finite values in <code class="md-code-inline">real</code> or in <code class="md-code-inline">synth</code></p>
+</li>
+</ul>
+<p>All scores are in [0, 1] where 0 is perfect fidelity.</p>
+<p>Columns with no variance are still scored individually — only the correlation term skips them, since a constant column has no ranks to correlate.</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.Evaluate.utility_tstr">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.Evaluate.utility_tstr</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/tstr.jl#L133-L160" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">utility_tstr(real, synth, target::Symbol;
              test=nothing, test_frac=0.2, nrounds=200,
              max_depth=6, eta=0.05, nbins=64,
-             rng=Random.default_rng()) -&gt; NamedTuple</code></pre><p>Train-on-Synthetic, Test-on-Real evaluation using gradient boosted trees from <code>EvoTrees.jl</code>.</p><ol><li>Train a model on <code>synth</code> features → <code>synth</code> target.</li><li>Evaluate on held-out real data → real target.</li><li>Also train on real train data → evaluate on the same held-out set (baseline).</li></ol><p>If <code>test</code> is provided (a Tables.jl-compatible table), it is used as the held-out test set. Otherwise, <code>real</code> is split into train/test using <code>test_frac</code> (default 0.2) with stratified sampling for classification.</p><p>For classification, reports both macro-averaged F1 score (following the TabDDPM evaluation protocol [Kotelnikov et al. 2023]) and accuracy. The ratio is computed from F1 scores.</p><p>Returns a <code>NamedTuple</code> with:</p><ul><li><code>task</code>: <code>:classification</code> or <code>:regression</code></li><li><code>synth_score</code>: F1 (classification) or RMSE (regression) of synth-trained model</li><li><code>real_score</code>: F1 / RMSE of real-trained model (baseline)</li><li><code>ratio</code>: <code>synth_score / real_score</code> — closer to 1.0 is better</li><li><code>synth_accuracy</code>, <code>real_accuracy</code>: (classification only) raw accuracy scores</li></ul></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/evaluate/tstr.jl#L133-L160">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.Evaluate.privacy_dcr"><a class="docstring-binding" href="#DataMimic.Evaluate.privacy_dcr"><code>DataMimic.Evaluate.privacy_dcr</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">privacy_dcr(real, synth) -&gt; NamedTuple</code></pre><p>Compute the Distance to Closest Record (DCR) for every synthetic row.</p><p>For each synthetic row, DCR is the L2 distance (after min-max normalization) to the nearest real row. Low DCR values indicate potential memorization.</p><p>Returns a <code>NamedTuple</code> with:</p><ul><li><code>dcr</code>: Vector of DCR values (one per synthetic row)</li><li><code>median</code>: median DCR</li><li><code>p5</code>: 5th percentile of DCR</li><li><code>exact_matches</code>: count of synthetic rows with DCR = 0</li></ul></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/evaluate/dcr.jl#L102-L115">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.Evaluate.jensen_shannon"><a class="docstring-binding" href="#DataMimic.Evaluate.jensen_shannon"><code>DataMimic.Evaluate.jensen_shannon</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">jensen_shannon(real, synth; n_bins=50) -&gt; NamedTuple</code></pre><p>Compute per-column Jensen–Shannon divergence between real and synthetic data.</p><p>Continuous columns are discretized into <code>n_bins</code> equal-width bins (using the range from <code>real</code>). Categorical columns use observed level frequencies.</p><p>Returns a <code>NamedTuple</code> with:</p><ul><li><code>column_scores</code>: Dict mapping column name → JSD value</li><li><code>column_kinds</code>: Dict mapping column name → <code>:numeric</code> or <code>:categorical</code></li><li><code>mean</code>: arithmetic mean of per-column JSD values</li><li><code>aggregate</code>: same as <code>mean</code> (no 2D component for JSD)</li></ul><p>All JSD values are in [0, log(2)] ≈ [0, 0.693] where 0 is identical.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/evaluate/jsd.jl#L78-L93">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.Evaluate.pairwise_marginal_error"><a class="docstring-binding" href="#DataMimic.Evaluate.pairwise_marginal_error"><code>DataMimic.Evaluate.pairwise_marginal_error</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">pairwise_marginal_error(real, synth; order=2, n_bins=20) -&gt; NamedTuple</code></pre><p>Measure joint distribution error between real and synthetic data by computing Total Variation Distance over every <code>order</code>-way combination of columns.</p><p>All columns are discretized: continuous → <code>n_bins</code> equal-width bins, categorical → integer-coded levels.</p><p>Returns a <code>NamedTuple</code> with:</p><ul><li><code>pair_scores</code>: Dict mapping column tuple → TVD score</li><li><code>mean</code>: arithmetic mean of all pair TVD scores</li><li><code>worst_pair</code>: the column tuple with the highest TVD</li><li><code>worst_score</code>: the highest TVD value</li><li><code>n_pairs</code>: number of column combinations evaluated</li></ul><p>All TVD values are in [0, 1] where 0 is identical joint distributions.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/evaluate/marginal_error.jl#L74-L91">source</a></section></details></article><article><details class="docstring" open="true"><summary id="DataMimic.Evaluate.privacy_utility_sweep"><a class="docstring-binding" href="#DataMimic.Evaluate.privacy_utility_sweep"><code>DataMimic.Evaluate.privacy_utility_sweep</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">privacy_utility_sweep(generator, table, epsilons, metric_fn;
+             rng=Random.default_rng()) -&gt; NamedTuple</code></pre>
+</div>
+<p>Train-on-Synthetic, Test-on-Real evaluation using gradient boosted trees from <code class="md-code-inline">EvoTrees.jl</code>.</p>
+<ol class="md-list-tight">
+<li><p>Train a model on <code class="md-code-inline">synth</code> features → <code class="md-code-inline">synth</code> target.</p>
+</li>
+<li><p>Evaluate on held-out real data → real target.</p>
+</li>
+<li><p>Also train on real train data → evaluate on the same held-out set (baseline).</p>
+</li>
+</ol>
+<p>If <code class="md-code-inline">test</code> is provided (a Tables.jl-compatible table), it is used as the held-out test set. Otherwise, <code class="md-code-inline">real</code> is split into train/test using <code class="md-code-inline">test_frac</code> (default 0.2) with stratified sampling for classification.</p>
+<p>For classification, reports both macro-averaged F1 score (following the TabDDPM evaluation protocol [Kotelnikov et al. 2023]) and accuracy. The ratio is computed from F1 scores.</p>
+<p>Returns a <code class="md-code-inline">NamedTuple</code> with:</p>
+<ul class="md-list-tight">
+<li><p><code class="md-code-inline">task</code>: <code class="md-code-inline">:classification</code> or <code class="md-code-inline">:regression</code></p>
+</li>
+<li><p><code class="md-code-inline">synth_score</code>: F1 (classification) or RMSE (regression) of synth-trained model</p>
+</li>
+<li><p><code class="md-code-inline">real_score</code>: F1 / RMSE of real-trained model (baseline)</p>
+</li>
+<li><p><code class="md-code-inline">ratio</code>: <code class="md-code-inline">synth_score / real_score</code> — closer to 1.0 is better</p>
+</li>
+<li><p><code class="md-code-inline">synth_accuracy</code>, <code class="md-code-inline">real_accuracy</code>: (classification only) raw accuracy scores</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.Evaluate.privacy_dcr">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.Evaluate.privacy_dcr</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/dcr.jl#L102-L115" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">privacy_dcr(real, synth) -&gt; NamedTuple</code></pre>
+</div>
+<p>Compute the Distance to Closest Record (DCR) for every synthetic row.</p>
+<p>For each synthetic row, DCR is the L2 distance (after min-max normalization) to the nearest real row. Low DCR values indicate potential memorization.</p>
+<p>Returns a <code class="md-code-inline">NamedTuple</code> with:</p>
+<ul class="md-list-tight">
+<li><p><code class="md-code-inline">dcr</code>: Vector of DCR values (one per synthetic row)</p>
+</li>
+<li><p><code class="md-code-inline">median</code>: median DCR</p>
+</li>
+<li><p><code class="md-code-inline">p5</code>: 5th percentile of DCR</p>
+</li>
+<li><p><code class="md-code-inline">exact_matches</code>: count of synthetic rows with DCR = 0</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.Evaluate.jensen_shannon">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.Evaluate.jensen_shannon</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/jsd.jl#L78-L93" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">jensen_shannon(real, synth; n_bins=50) -&gt; NamedTuple</code></pre>
+</div>
+<p>Compute per-column Jensen–Shannon divergence between real and synthetic data.</p>
+<p>Continuous columns are discretized into <code class="md-code-inline">n_bins</code> equal-width bins (using the range from <code class="md-code-inline">real</code>). Categorical columns use observed level frequencies.</p>
+<p>Returns a <code class="md-code-inline">NamedTuple</code> with:</p>
+<ul class="md-list-tight">
+<li><p><code class="md-code-inline">column_scores</code>: Dict mapping column name → JSD value</p>
+</li>
+<li><p><code class="md-code-inline">column_kinds</code>: Dict mapping column name → <code class="md-code-inline">:numeric</code> or <code class="md-code-inline">:categorical</code></p>
+</li>
+<li><p><code class="md-code-inline">mean</code>: arithmetic mean of per-column JSD values</p>
+</li>
+<li><p><code class="md-code-inline">aggregate</code>: same as <code class="md-code-inline">mean</code> (no 2D component for JSD)</p>
+</li>
+</ul>
+<p>All JSD values are in [0, log(2)] ≈ [0, 0.693] where 0 is identical.</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.Evaluate.pairwise_marginal_error">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.Evaluate.pairwise_marginal_error</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/marginal_error.jl#L74-L91" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">pairwise_marginal_error(real, synth; order=2, n_bins=20) -&gt; NamedTuple</code></pre>
+</div>
+<p>Measure joint distribution error between real and synthetic data by computing Total Variation Distance over every <code class="md-code-inline">order</code>-way combination of columns.</p>
+<p>All columns are discretized: continuous → <code class="md-code-inline">n_bins</code> equal-width bins, categorical → integer-coded levels.</p>
+<p>Returns a <code class="md-code-inline">NamedTuple</code> with:</p>
+<ul class="md-list-tight">
+<li><p><code class="md-code-inline">pair_scores</code>: Dict mapping column tuple → TVD score</p>
+</li>
+<li><p><code class="md-code-inline">mean</code>: arithmetic mean of all pair TVD scores</p>
+</li>
+<li><p><code class="md-code-inline">worst_pair</code>: the column tuple with the highest TVD</p>
+</li>
+<li><p><code class="md-code-inline">worst_score</code>: the highest TVD value</p>
+</li>
+<li><p><code class="md-code-inline">n_pairs</code>: number of column combinations evaluated</p>
+</li>
+</ul>
+<p>All TVD values are in [0, 1] where 0 is identical joint distributions.</p>
+</div>
+</div>
+<div class="md-docstring" id="DataMimic.Evaluate.privacy_utility_sweep">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.Evaluate.privacy_utility_sweep</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/sweep.jl#L6-L32" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">privacy_utility_sweep(generator, table, epsilons, metric_fn;
                       n = nothing, hints = ColumnHint[],
                       identifiers = Symbol[],
                       fill = Dict{Symbol, FillSpec}(),
                       rng = Random.default_rng(),
                       delta = 1e-5,
-                      metric_kw...) -&gt; Vector{NamedTuple}</code></pre><p>Run a privacy–utility curve: for each ε in <code>epsilons</code>, fit <code>generator</code> with <code>PrivacyBudget(; epsilon=ε, delta)</code>, sample <code>n</code> rows (default = number of rows in <code>table</code>), and evaluate with <code>metric_fn(real, synth)</code>.</p><p><code>generator</code> must be an <code>AbstractPrivateGenerator</code> or a <code>DiffusionGenerator(dp=true)</code>.</p><p>Returns a vector of <code>(; epsilon, delta, metric_result)</code> named tuples, one per ε value, sorted by ascending ε.</p><p>Standard usage:</p><pre><code class="language-julia hljs">results = privacy_utility_sweep(
+                      metric_kw...) -&gt; Vector{NamedTuple}</code></pre>
+</div>
+<p>Run a privacy–utility curve: for each ε in <code class="md-code-inline">epsilons</code>, fit <code class="md-code-inline">generator</code> with <code class="md-code-inline">PrivacyBudget(; epsilon=ε, delta)</code>, sample <code class="md-code-inline">n</code> rows (default = number of rows in <code class="md-code-inline">table</code>), and evaluate with <code class="md-code-inline">metric_fn(real, synth)</code>.</p>
+<p><code class="md-code-inline">generator</code> must be an <code class="md-code-inline">AbstractPrivateGenerator</code> or a <code class="md-code-inline">DiffusionGenerator(dp=true)</code>.</p>
+<p>Returns a vector of <code class="md-code-inline">(; epsilon, delta, metric_result)</code> named tuples, one per ε value, sorted by ascending ε.</p>
+<p>Standard usage:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">results = privacy_utility_sweep(
     MSTGenerator(), data, [0.1, 0.5, 1.0, 5.0, 10.0],
     fidelity_score
-)</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/mthelm85/DataMimic.jl/blob/9c849e8ab62b20092e0fdb2dd272d192c2225824/src/evaluate/sweep.jl#L6-L32">source</a></section></details></article></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../evaluation/">« Evaluation</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Monday 31 August 2026 02:29">Monday 31 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+)</code></pre>
+</div>
+</div>
+</div>
+      </article>
+      <footer class="md-footer">
+        <p>Built with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and <a href="https://github.com/mthelm85/MaterialDocs.jl">MaterialDocs.jl</a></p>
+      </footer>
+    </main>
+    <aside class="md-toc">
+      <div class="md-toc-inner">
+        <p class="md-toc-title">On this page</p>
+          <a class="md-toc-link md-toc-h2" href="#Fitting-and-sampling">Fitting and sampling</a>
+          <a class="md-toc-link md-toc-h2" href="#Generators">Generators</a>
+          <a class="md-toc-link md-toc-h2" href="#Fitted-models">Fitted models</a>
+          <a class="md-toc-link md-toc-h2" href="#Configuration">Configuration</a>
+          <a class="md-toc-link md-toc-h2" href="#Persistence">Persistence</a>
+          <a class="md-toc-link md-toc-h2" href="#Evaluation">Evaluation</a>
+      </div>
+    </aside>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia-repl.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <script src="../assets/materialdocs.js?v=ba0d6399"></script>
+</body>
+</html>

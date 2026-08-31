@@ -1,5 +1,85 @@
-<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Engines · DataMimic.jl</title><meta name="title" content="Engines · DataMimic.jl"/><meta property="og:title" content="Engines · DataMimic.jl"/><meta property="twitter:title" content="Engines · DataMimic.jl"/><meta name="description" content="Documentation for DataMimic.jl."/><meta property="og:description" content="Documentation for DataMimic.jl."/><meta property="twitter:description" content="Documentation for DataMimic.jl."/><meta property="og:url" content="https://mthelm85.github.io/DataMimic.jl/engines/"/><meta property="twitter:url" content="https://mthelm85.github.io/DataMimic.jl/engines/"/><link rel="canonical" href="https://mthelm85.github.io/DataMimic.jl/engines/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.png" alt="DataMimic.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">DataMimic.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li class="is-active"><a class="tocitem" href>Engines</a><ul class="internal"><li><a class="tocitem" href="#Choosing-between-them"><span>Choosing between them</span></a></li><li><a class="tocitem" href="#CopulaGenerator"><span>CopulaGenerator</span></a></li><li><a class="tocitem" href="#DiffusionGenerator"><span>DiffusionGenerator</span></a></li><li><a class="tocitem" href="#MSTGenerator"><span>MSTGenerator</span></a></li><li><a class="tocitem" href="#DPCopulaGenerator"><span>DPCopulaGenerator</span></a></li></ul></li><li><a class="tocitem" href="../privacy/">Privacy</a></li><li><a class="tocitem" href="../evaluation/">Evaluation</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Engines</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Engines</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/mthelm85/DataMimic.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/mthelm85/DataMimic.jl/blob/main/docs/src/engines.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Engines"><a class="docs-heading-anchor" href="#Engines">Engines</a><a id="Engines-1"></a><a class="docs-heading-anchor-permalink" href="#Engines" title="Permalink"></a></h1><table><tr><th style="text-align: right">Generator</th><th style="text-align: right">Private</th><th style="text-align: right">Reach for it when</th></tr><tr><td style="text-align: right"><a href="#CopulaGenerator"><code>CopulaGenerator</code></a></td><td style="text-align: right">no</td><td style="text-align: right">You want speed. Strong on mixed numeric/categorical tables</td></tr><tr><td style="text-align: right"><a href="#DiffusionGenerator"><code>DiffusionGenerator</code></a></td><td style="text-align: right">optional</td><td style="text-align: right">You want the highest fidelity, and can afford training time</td></tr><tr><td style="text-align: right"><a href="#MSTGenerator"><code>MSTGenerator</code></a></td><td style="text-align: right">yes</td><td style="text-align: right">Private, categorical-heavy data</td></tr><tr><td style="text-align: right"><a href="#DPCopulaGenerator"><code>DPCopulaGenerator</code></a></td><td style="text-align: right">yes</td><td style="text-align: right">Private, continuous-heavy data</td></tr></table><h2 id="Choosing-between-them"><a class="docs-heading-anchor" href="#Choosing-between-them">Choosing between them</a><a id="Choosing-between-them-1"></a><a class="docs-heading-anchor-permalink" href="#Choosing-between-them" title="Permalink"></a></h2><p>The table above says what each engine is <em>for</em>, which is enough to narrow the field but not to pick a winner. Relative performance depends on the data in ways that table shape does not predict — the ordering that holds on one dataset frequently reverses on another, and for private engines it also moves with ε and with row count.</p><p>So measure instead of guessing. <a href="../api/#DataMimic.Evaluate.compare"><code>compare</code></a> fits a list of engines to your own table, repeats each over several seeds, and reports the mean and spread of whatever metrics you name. See <a href="../evaluation/#Comparing-engines">Comparing engines</a>.</p><h2 id="CopulaGenerator"><a class="docs-heading-anchor" href="#CopulaGenerator">CopulaGenerator</a><a id="CopulaGenerator-1"></a><a class="docs-heading-anchor-permalink" href="#CopulaGenerator" title="Permalink"></a></h2><p>A copula over the modelled columns, with empirical marginals. <code>:beta</code> fits a <code>BetaCopula</code>; <code>:gaussian</code> fits a Gaussian copula.</p><p>Categorical and binary columns take part in the copula through an ordinal encoding of their empirical CDF (the <em>distributional transform</em>): a level occupying <code>[F(k-1), F(k)]</code> maps to a uniform draw inside that interval, and sampling inverts the same CDF. Dependence between categorical and numeric columns is therefore modelled rather than discarded.</p><p>Two caveats. The association a copula can express is monotone in the level order, which is arbitrary for a nominal variable — so this captures a real part of the dependence, not all of it. And <code>:beta</code> handles this far better than <code>:gaussian</code>, because it is nonparametric and can represent the non-monotone structure an arbitrary ordering produces. On Adult, train-on-synthetic utility is 0.99 for <code>:beta</code> against 0.66 for <code>:gaussian</code>; prefer the default unless you have a reason not to.</p><p>A categorical column with only one level cannot be encoded, so it is left out of the copula and drawn independently.</p><h2 id="DiffusionGenerator"><a class="docs-heading-anchor" href="#DiffusionGenerator">DiffusionGenerator</a><a id="DiffusionGenerator-1"></a><a class="docs-heading-anchor-permalink" href="#DiffusionGenerator" title="Permalink"></a></h2><p>TabDDPM: Gaussian diffusion on numeric features and multinomial diffusion on categoricals, with a plain MLP denoiser. Requires <code>Lux</code> and <code>Zygote</code>.</p><p>Naming a <code>target</code> column enables class-conditional generation, which substantially improves downstream utility on classification-style tables:</p><pre><code class="language-julia hljs">using Lux, Zygote
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Engines — DataMimic.jl</title>
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=3b0d7a46">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="icon" href="../assets/favicon.png">
+  <script>
+    (function(){
+      document.documentElement.classList.add('no-transition');
+      window.addEventListener('load',function(){setTimeout(function(){document.documentElement.classList.remove('no-transition');},50);});
+    })()
+  </script>
+</head>
+<body>
+  <header class="md-navbar">
+    <button id="md-hamburger" class="md-hamburger" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <img class="md-navbar-logo" src="../assets/logo.png" alt="DataMimic.jl logo" height="32">
+    <span class="md-navbar-title">DataMimic.jl</span>
+    <span style="flex:1"></span>
+    <button id="md-search-btn" class="md-icon-btn" title="Search (Ctrl+K)" aria-label="Search documentation">🔍</button>
+  </header>
+  <div class="md-layout">
+    <nav class="md-sidebar">
+      <a href="../">Home</a>
+      <a href="../engines/">Engines</a>
+      <a href="../privacy/">Privacy</a>
+      <a href="../evaluation/">Evaluation</a>
+      <a href="../api/">API</a>
+    </nav>
+    <main class="md-content">
+      <article class="md-article">
+<h1 id="Engines" class="md-heading">Engines<a href="#Engines" class="md-heading-anchor" aria-label="Link to this section">#</a></h1>
+<div class="md-table-wrap">
+<table class="md-table">
+<thead>
+<tr>
+<th style="text-align:right">Generator</th>
+<th style="text-align:right">Private</th>
+<th style="text-align:right">Reach for it when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right"><a href="../engines/#CopulaGenerator"><code class="md-code-inline">CopulaGenerator</code></a></td>
+<td style="text-align:right">no</td>
+<td style="text-align:right">You want speed. Strong on mixed numeric/categorical tables</td>
+</tr>
+<tr>
+<td style="text-align:right"><a href="../engines/#DiffusionGenerator"><code class="md-code-inline">DiffusionGenerator</code></a></td>
+<td style="text-align:right">optional</td>
+<td style="text-align:right">You want the highest fidelity, and can afford training time</td>
+</tr>
+<tr>
+<td style="text-align:right"><a href="../engines/#MSTGenerator"><code class="md-code-inline">MSTGenerator</code></a></td>
+<td style="text-align:right">yes</td>
+<td style="text-align:right">Private, categorical-heavy data</td>
+</tr>
+<tr>
+<td style="text-align:right"><a href="../engines/#DPCopulaGenerator"><code class="md-code-inline">DPCopulaGenerator</code></a></td>
+<td style="text-align:right">yes</td>
+<td style="text-align:right">Private, continuous-heavy data</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2 id="Choosing-between-them" class="md-heading">Choosing between them<a href="#Choosing-between-them" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>The table above says what each engine is <em>for</em>, which is enough to narrow the field but not to pick a winner. Relative performance depends on the data in ways that table shape does not predict — the ordering that holds on one dataset frequently reverses on another, and for private engines it also moves with ε and with row count.</p>
+<p>So measure instead of guessing. <a href="../api/#DataMimic.Evaluate.compare"><code class="md-code-inline">compare</code></a> fits a list of engines to your own table, repeats each over several seeds, and reports the mean and spread of whatever metrics you name. See <a href="../evaluation/#Comparing-engines">Comparing engines</a>.</p>
+<h2 id="CopulaGenerator" class="md-heading">CopulaGenerator<a href="#CopulaGenerator" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>A copula over the modelled columns, with empirical marginals. <code class="md-code-inline">:beta</code> fits a <code class="md-code-inline">BetaCopula</code>; <code class="md-code-inline">:gaussian</code> fits a Gaussian copula.</p>
+<p>Categorical and binary columns take part in the copula through an ordinal encoding of their empirical CDF (the <em>distributional transform</em>): a level occupying <code class="md-code-inline">[F(k-1), F(k)]</code> maps to a uniform draw inside that interval, and sampling inverts the same CDF. Dependence between categorical and numeric columns is therefore modelled rather than discarded.</p>
+<p>Two caveats. The association a copula can express is monotone in the level order, which is arbitrary for a nominal variable — so this captures a real part of the dependence, not all of it. And <code class="md-code-inline">:beta</code> handles this far better than <code class="md-code-inline">:gaussian</code>, because it is nonparametric and can represent the non-monotone structure an arbitrary ordering produces. On Adult, train-on-synthetic utility is 0.99 for <code class="md-code-inline">:beta</code> against 0.66 for <code class="md-code-inline">:gaussian</code>; prefer the default unless you have a reason not to.</p>
+<p>A categorical column with only one level cannot be encoded, so it is left out of the copula and drawn independently.</p>
+<h2 id="DiffusionGenerator" class="md-heading">DiffusionGenerator<a href="#DiffusionGenerator" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>TabDDPM: Gaussian diffusion on numeric features and multinomial diffusion on categoricals, with a plain MLP denoiser. Requires <code class="md-code-inline">Lux</code> and <code class="md-code-inline">Zygote</code>.</p>
+<p>Naming a <code class="md-code-inline">target</code> column enables class-conditional generation, which substantially improves downstream utility on classification-style tables:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">using Lux, Zygote
 
 gen = DiffusionGenerator(
     epochs        = 3750,
@@ -8,4 +88,34 @@ gen = DiffusionGenerator(
     num_timesteps = 100,
     target        = :income_bracket,
 )
-model = fit(gen, df)</code></pre><p>Setting <code>dp = true</code> trains with DP-SGD and requires a <code>PrivacyBudget</code>.</p><h2 id="MSTGenerator"><a class="docs-heading-anchor" href="#MSTGenerator">MSTGenerator</a><a id="MSTGenerator-1"></a><a class="docs-heading-anchor-permalink" href="#MSTGenerator" title="Permalink"></a></h2><p>Discretizes every column, measures all one-way marginals under Gaussian noise, selects a spanning tree over columns with the exponential mechanism, measures the selected two-way marginals, then reconciles every measurement into a consistent tree-structured model before sampling.</p><p>The reconciliation step matters most at tight budgets, where measurement noise dominates; by <code>ε ≈ 4</code> it makes little difference.</p><h2 id="DPCopulaGenerator"><a class="docs-heading-anchor" href="#DPCopulaGenerator">DPCopulaGenerator</a><a id="DPCopulaGenerator-1"></a><a class="docs-heading-anchor-permalink" href="#DPCopulaGenerator" title="Permalink"></a></h2><p>Differentially private histogram marginals combined with a private covariance matrix (Analyze-Gauss), assembled into a Gaussian copula. Suits continuous-heavy tables at moderate ε.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../privacy/">Privacy »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Monday 31 August 2026 02:29">Monday 31 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+model = fit(gen, df)</code></pre>
+</div>
+<p>Setting <code class="md-code-inline">dp = true</code> trains with DP-SGD and requires a <code class="md-code-inline">PrivacyBudget</code>.</p>
+<h2 id="MSTGenerator" class="md-heading">MSTGenerator<a href="#MSTGenerator" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>Discretizes every column, measures all one-way marginals under Gaussian noise, selects a spanning tree over columns with the exponential mechanism, measures the selected two-way marginals, then reconciles every measurement into a consistent tree-structured model before sampling.</p>
+<p>The reconciliation step matters most at tight budgets, where measurement noise dominates; by <code class="md-code-inline">ε ≈ 4</code> it makes little difference.</p>
+<h2 id="DPCopulaGenerator" class="md-heading">DPCopulaGenerator<a href="#DPCopulaGenerator" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>Differentially private histogram marginals combined with a private covariance matrix (Analyze-Gauss), assembled into a Gaussian copula. Suits continuous-heavy tables at moderate ε.</p>
+      </article>
+      <footer class="md-footer">
+        <p>Built with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and <a href="https://github.com/mthelm85/MaterialDocs.jl">MaterialDocs.jl</a></p>
+      </footer>
+    </main>
+    <aside class="md-toc">
+      <div class="md-toc-inner">
+        <p class="md-toc-title">On this page</p>
+          <a class="md-toc-link md-toc-h2" href="#Choosing-between-them">Choosing between them</a>
+          <a class="md-toc-link md-toc-h2" href="#CopulaGenerator">CopulaGenerator</a>
+          <a class="md-toc-link md-toc-h2" href="#DiffusionGenerator">DiffusionGenerator</a>
+          <a class="md-toc-link md-toc-h2" href="#MSTGenerator">MSTGenerator</a>
+          <a class="md-toc-link md-toc-h2" href="#DPCopulaGenerator">DPCopulaGenerator</a>
+      </div>
+    </aside>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia-repl.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <script src="../assets/materialdocs.js?v=3b0d7a46"></script>
+</body>
+</html>
