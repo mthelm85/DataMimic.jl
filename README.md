@@ -1,3 +1,6 @@
+<img src="docs/src/assets/logo.png" align="right" width="170"
+     alt="DataMimic logo: a mimic octopus holding a bar chart, a pie chart and a data grid">
+
 # DataMimic.jl
 
 [![CI](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml)
