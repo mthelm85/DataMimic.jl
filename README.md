@@ -79,8 +79,9 @@ result**.
 
 ```julia
 df = DataFrame(
-    ein    = ["12-3456789", "98-7654321"],
-    amount = [1200.0, 850.0],
+    ein     = ["12-3456789", "98-7654321", "55-1122334"],
+    amount  = [1200.0, 850.0, 2310.0],
+    quarter = ["Q1", "Q2", "Q1"],
 )
 
 model = fit(CopulaGenerator(), df;

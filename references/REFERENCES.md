@@ -55,15 +55,17 @@ Papers and methods underpinning each engine and evaluation module.
   Linear β schedule, forward noising process q(x_t | x_0), simplified
   training objective (predict noise ε).
 
-### Deterministic Sampling (DDIM)
+### Deterministic Sampling (DDIM) — *not implemented*
 
 - **Song, J., Meng, C., & Ermon, S. (2020).**
   *Denoising Diffusion Implicit Models.*
   ICLR 2021. [arXiv:2010.02502](https://arxiv.org/abs/2010.02502)
 
-  Deterministic reverse-process sampler enabling fewer sampling steps
-  (`sampling_steps` parameter) without retraining. η parameter controls
-  stochasticity (η=0 → deterministic DDIM, η=1 → DDPM).
+  A deterministic reverse-process sampler that allows fewer sampling steps
+  without retraining. **`DiffusionGenerator` does not implement this** — it
+  samples with the full stochastic DDPM reverse process over `num_timesteps`
+  steps. Listed as the obvious route to faster sampling, not as a description
+  of current behaviour.
 
 ### Multinomial Diffusion
 
@@ -109,12 +111,21 @@ Papers and methods underpinning each engine and evaluation module.
 - **Nelsen, R. B. (2006).**
   *An Introduction to Copulas.* 2nd edition. Springer.
 
-  General copula theory. `CopulaGenerator` models dependence among the
-  *numeric* columns with a Gaussian (or Beta) copula fitted by `Copulas.jl`
-  to rank-based pseudo-observations — by default maximum likelihood on normal
-  scores, not the rank-inversion (Spearman/Kendall) estimators. Categorical
-  and binary columns are sampled independently from their empirical
-  distributions and are not part of the copula.
+  General copula theory. `CopulaGenerator` models dependence with a Beta
+  (default) or Gaussian copula fitted by `Copulas.jl` to rank-based
+  pseudo-observations.
+
+  Categorical and binary columns **are** part of the copula, encoded by the
+  distributional transform: a level occupying the empirical CDF interval
+  `[F(k-1), F(k)]` maps to a uniform draw inside that interval, and sampling
+  inverts the same step function. Including them raised train-on-synthetic
+  utility on Adult from 0.54 to 0.99. The association this can express is
+  monotone in the level ordering, which is arbitrary for a nominal variable,
+  so it captures a substantial part of the dependence rather than all of it —
+  and the nonparametric Beta copula handles the resulting non-monotone
+  structure far better than the Gaussian one (0.99 against 0.66 on Adult).
+  A categorical column with a single observed level is left out and drawn
+  independently.
 
 ---
 
