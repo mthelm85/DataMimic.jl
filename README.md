@@ -111,8 +111,7 @@ A fill spec is one of:
 ### Choosing one
 
 Which engine wins depends on the table, and not in ways that are reliable to
-predict from its shape: engines that rank one way on one dataset routinely
-swap on another. Rather than guess, measure — [`compare`](#comparing-engines)
+predict from its shape. Rather than guess, measure — [`compare`](#comparing-engines)
 fits several engines to *your* data and scores them.
 
 ### Class-conditional diffusion
