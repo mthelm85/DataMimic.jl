@@ -8,3 +8,6 @@ DataMimic = {path = ".."}
 
 [compat]
 Documenter = "1"
+
+[sources.MaterialDocs]
+url = "https://github.com/mthelm85/MaterialDocs.jl.git"
