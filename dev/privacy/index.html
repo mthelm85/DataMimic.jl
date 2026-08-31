@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Privacy — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=8ce3ace3">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=c02dfda2">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -63,7 +63,7 @@ model  = fit(MSTGenerator(), df; privacy = budget)</code></pre>
 </li>
 <li><p><strong><a href="../api/#DataMimic.DPCopulaGenerator"><code class="md-code-inline">DPCopulaGenerator</code></a></strong> splits between the histogram marginals and the private covariance matrix.</p>
 </li>
-<li><p><strong><a href="../api/#DataMimic.DiffusionGenerator"><code class="md-code-inline">DiffusionGenerator</code></a><code class="md-code-inline">(dp = true)</code></strong> trains with DP-SGD — per-example gradient clipping plus Gaussian noise — accounted with Rényi DP over Poisson-subsampled minibatches.</p>
+<li><p><strong><a href="../api/#DataMimic.DiffusionGenerator"><code class="md-code-inline">DiffusionGenerator</code></a><code class="md-code-inline">(dp = true)</code></strong> trains with DP-SGD — per-example gradient clipping plus Gaussian noise — accounted with Rényi DP over Poisson-subsampled minibatches. Per-example clipping makes this far slower than ordinary training, and it runs on the CPU for the reason given under <a href="../engines/#DiffusionGenerator">DiffusionGenerator</a>.</p>
 </li>
 </ul>
 <p>Sampling from a fitted private model is post-processing: draw as many synthetic rows as you like without spending anything more. This is a genuine property of differential privacy, not a shortcut — once the model is private, no amount of querying it can un-privatize it.</p>
@@ -116,6 +116,6 @@ model  = fit(MSTGenerator(), df; privacy = budget)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=8ce3ace3"></script>
+  <script src="../assets/materialdocs.js?v=c02dfda2"></script>
 </body>
 </html>
