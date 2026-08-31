@@ -30,6 +30,32 @@ Load the UCI Adult (Census Income) dataset.
 - 14 features (6 continuous, 8 categorical) + 1 binary target (:income)
 - ~48,842 rows when `combine=true` (train + test)
 """
+# ─── Adult value normalisation ─────────────────────────────────────────────
+#
+# The raw files pad every field with a leading space (" State-gov"), and mark
+# missing entries with "?". Passing `missingstring = " ?"` to CSV.read does not
+# catch them, so for a long time this loader returned 6,465 entries across
+# :workclass, :occupation and :native_country as the literal string " ?" — a
+# category level rather than a missing value. UCI documents "?" as the missing
+# marker, so treat it as one, and strip the padding while we are here.
+function _normalize_adult!(df::DataFrame)
+    for c in names(df)
+        col = df[!, c]
+        eltype(col) <: Union{Missing, AbstractString} || continue
+        cleaned = Vector{Union{Missing, String}}(undef, length(col))
+        for (i, v) in enumerate(col)
+            if ismissing(v)
+                cleaned[i] = missing
+            else
+                t = strip(String(v))
+                cleaned[i] = t == "?" ? missing : t
+            end
+        end
+        df[!, c] = cleaned
+    end
+    return df
+end
+
 function load_adult(; combine::Bool = true)
     ensure_data_dir()
 
@@ -63,6 +89,9 @@ function load_adult(; combine::Bool = true)
 
     # Clean up target: test set has trailing "." on labels
     test.income = replace.(test.income, r"\.$" => "")
+
+    _normalize_adult!(train)
+    _normalize_adult!(test)
 
     df = combine ? vcat(train, test) : train
 
@@ -120,5 +149,111 @@ function load_covertype(; n::Union{Nothing, Int} = nothing)
     end
 
     @info "Covertype dataset loaded" rows=nrow(df) cols=ncol(df)
+    return df
+end
+
+# ─── German Credit (Statlog) ───────────────────────────────────────────────
+
+const GERMAN_URL = "https://archive.ics.uci.edu/ml/machine-learning-databases/statlog/german/german.data"
+
+# The raw file codes every categorical level as "A" plus a number, which is
+# unreadable in a synthetic sample. These maps restore the documented meanings
+# so the output can be eyeballed.
+const GERMAN_LEVELS = Dict(
+    :checking_status  => Dict("A11" => "<0DM", "A12" => "0-200DM",
+                              "A13" => ">=200DM", "A14" => "none"),
+    :credit_history   => Dict("A30" => "none_taken", "A31" => "all_paid",
+                              "A32" => "existing_paid", "A33" => "delayed",
+                              "A34" => "critical"),
+    :purpose          => Dict("A40" => "car_new", "A41" => "car_used",
+                              "A42" => "furniture", "A43" => "radio_tv",
+                              "A44" => "appliances", "A45" => "repairs",
+                              "A46" => "education", "A47" => "vacation",
+                              "A48" => "retraining", "A49" => "business",
+                              "A410" => "other"),
+    :savings          => Dict("A61" => "<100DM", "A62" => "100-500DM",
+                              "A63" => "500-1000DM", "A64" => ">=1000DM",
+                              "A65" => "unknown"),
+    :employment_since => Dict("A71" => "unemployed", "A72" => "<1yr",
+                              "A73" => "1-4yr", "A74" => "4-7yr", "A75" => ">=7yr"),
+    :personal_status  => Dict("A91" => "male_divorced", "A92" => "female_div_sep_mar",
+                              "A93" => "male_single", "A94" => "male_married",
+                              "A95" => "female_single"),
+    :other_debtors    => Dict("A101" => "none", "A102" => "co_applicant",
+                              "A103" => "guarantor"),
+    :property         => Dict("A121" => "real_estate", "A122" => "savings_agreement",
+                              "A123" => "car", "A124" => "unknown"),
+    :other_plans      => Dict("A141" => "bank", "A142" => "stores", "A143" => "none"),
+    :housing          => Dict("A151" => "rent", "A152" => "own", "A153" => "free"),
+    :job              => Dict("A171" => "unemployed_nonres", "A172" => "unskilled_res",
+                              "A173" => "skilled", "A174" => "management"),
+    :telephone        => Dict("A191" => "none", "A192" => "yes"),
+    :foreign_worker   => Dict("A201" => "yes", "A202" => "no"),
+)
+
+"""
+    load_german_credit() -> DataFrame
+
+UCI Statlog (German Credit). 1,000 rows, 13 categorical and 7 numeric
+attributes, with a binary `:credit_risk` target.
+
+Small and categorical-heavy, which is the shape `MSTGenerator` is built for —
+and a credit file is the kind of data where a formal privacy guarantee is the
+point rather than a nicety.
+"""
+function load_german_credit()
+    ensure_data_dir()
+    path = joinpath(DATA_DIR, "german.data")
+    if !isfile(path)
+        @info "Downloading German Credit data..."
+        Downloads.download(GERMAN_URL, path)
+    end
+
+    names_ = [:checking_status, :duration_months, :credit_history, :purpose,
+              :credit_amount, :savings, :employment_since, :installment_rate,
+              :personal_status, :other_debtors, :residence_since, :property,
+              :age, :other_plans, :housing, :existing_credits, :job,
+              :dependents, :telephone, :foreign_worker, :credit_risk]
+
+    df = CSV.read(path, DataFrame; header = false, delim = ' ', ignorerepeated = true)
+    rename!(df, names_)
+
+    for (col, map) in GERMAN_LEVELS
+        df[!, col] = [get(map, v, v) for v in df[!, col]]
+    end
+    df.credit_risk = [v == 1 ? "good" : "bad" for v in df.credit_risk]
+
+    return df
+end
+
+# ─── Wine Quality ──────────────────────────────────────────────────────────
+
+const WINE_WHITE_URL = "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-white.csv"
+const WINE_RED_URL   = "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv"
+
+"""
+    load_wine(; colour = :white) -> DataFrame
+
+UCI Wine Quality. 4,898 white (or 1,599 red) rows, 11 continuous physico-
+chemical measurements plus an integer `:quality` score.
+
+Entirely continuous, and strongly correlated — density against residual sugar
+and alcohol especially — which makes it the clearest place to watch a copula
+reproduce a dependence structure, and the fairest ground for
+`DPCopulaGenerator`.
+"""
+function load_wine(; colour::Symbol = :white)
+    colour in (:white, :red) || throw(ArgumentError("colour must be :white or :red"))
+    ensure_data_dir()
+    fname = colour === :white ? "winequality-white.csv" : "winequality-red.csv"
+    url   = colour === :white ? WINE_WHITE_URL : WINE_RED_URL
+    path  = joinpath(DATA_DIR, fname)
+    if !isfile(path)
+        @info "Downloading Wine Quality ($colour)..."
+        Downloads.download(url, path)
+    end
+
+    df = CSV.read(path, DataFrame; delim = ';')
+    rename!(df, Dict(n => Symbol(replace(string(n), " " => "_")) for n in names(df)))
     return df
 end

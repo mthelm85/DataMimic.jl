@@ -1656,17 +1656,34 @@ reverse process to overflow and produce `Inf` or `NaN` rows.  The reference
 implementation expects this and filters such rows before returning; this does
 the same, redrawing to make up the shortfall.
 
+**Rejection here is not distribution-preserving.** Keeping only the rows that
+came back finite samples from the distribution *conditioned on finiteness*, and
+divergence is not independent of the data: for a class-conditional model it
+correlates with the label, because the label is an input to the denoiser. On an
+undertrained Adult model this turned a 76/24 income split into 100% one class -
+a silently biased sample, which is worse than an obviously broken one.
+
+Two things follow. Labels are redrawn for each attempt rather than reusing a
+prefix of the original draw, so a retry is not conditioned on the same labels.
+And once the discard rate passes `max_discard_rate` the sample is refused
+outright, because past that point the bias is not a rounding detail. A few
+discarded rows out of many are tolerated with a warning; a majority are not.
+
 Persistent failure means the model itself is unusable rather than unlucky, so
 it raises with the likely cause instead of returning quietly corrupted data.
 """
 function _denoise_sample_finite(backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
                                 sched, d_num, cat_dims, n, rng, y_idx;
-                                max_attempts::Int = 8)
+                                max_attempts::Int = 8,
+                                max_discard_rate::Float64 = 0.10,
+                                draw_labels = nothing)
     d_cat_total = sum(cat_dims; init = 0)
     num_parts = Matrix{Float32}[]
     cat_parts = Matrix{Float32}[]
     y_parts   = Vector{Int}[]
     have = 0
+    total_drawn = 0
+    total_kept  = 0
 
     for attempt in 1:max_attempts
         want = n - have
@@ -1675,9 +1692,15 @@ function _denoise_sample_finite(backbone, emb_layer, ps_bb, ps_emb, st_bb, st_em
         # need many rounds to converge.
         draw = attempt == 1 ? want : min(2 * want, 4 * n)
 
-        y_draw = y_idx === nothing ? nothing : y_idx[1:min(draw, length(y_idx))]
-        if y_idx !== nothing && draw > length(y_idx)
-            y_draw = vcat(y_idx, y_idx[1:(draw - length(y_idx))])
+        # Fresh labels per attempt. Reusing a prefix of the original draw
+        # would condition every retry on the same labels, which is exactly
+        # the wrong thing when divergence correlates with the label.
+        y_draw = if y_idx === nothing
+            nothing
+        elseif draw_labels !== nothing
+            draw_labels(draw)
+        else
+            [y_idx[mod1(i, length(y_idx))] for i in 1:draw]
         end
 
         xn, xc = _denoise_sample(backbone, emb_layer, ps_bb, ps_emb,
@@ -1689,6 +1712,8 @@ function _denoise_sample_finite(backbone, emb_layer, ps_bb, ps_emb, st_bb, st_em
             [all(isfinite, view(xn_h, :, j)) for j in 1:size(xn_h, 2)] :
             trues(size(xc_h, 2))
         nkeep = count(keep)
+        total_drawn += draw
+        total_kept  += nkeep
         if nkeep > 0
             take = min(nkeep, n - have)
             idx  = findall(keep)[1:take]
@@ -1697,20 +1722,34 @@ function _denoise_sample_finite(backbone, emb_layer, ps_bb, ps_emb, st_bb, st_em
             y_draw !== nothing && push!(y_parts, y_draw[idx])
             have += take
         end
-
-        if attempt == 1 && nkeep < draw
-            @warn "Discarded $(draw - nkeep) of $draw sampled rows with " *
-                  "non-finite values and redrew them. This usually means the " *
-                  "diffusion model is undertrained — try more epochs, a lower " *
-                  "learning rate, or fewer timesteps."
-        end
     end
+
+    discarded = total_drawn - total_kept
+    rate = total_drawn == 0 ? 0.0 : discarded / total_drawn
 
     if have < n
         error("DiffusionGenerator could not draw $n finite rows " *
               "($have after $max_attempts attempts). The reverse process is " *
               "diverging, which points at an undertrained or unstable model: " *
               "try more epochs, a lower learning rate, or fewer timesteps.")
+    end
+
+    if rate > max_discard_rate
+        error("DiffusionGenerator discarded $discarded of $total_drawn " *
+              "sampled rows ($(round(100 * rate; digits = 1))%) for " *
+              "containing non-finite values. Keeping only the rows that " *
+              "survive is not distribution-preserving: divergence correlates " *
+              "with the data, and for a class-conditional model with the " *
+              "label, so the remaining sample would be biased in a way " *
+              "nothing downstream would reveal. Refusing to return it. The " *
+              "model is undertrained or unstable - try more epochs, a lower " *
+              "learning rate, or fewer timesteps.")
+    elseif discarded > 0
+        @warn "Discarded $discarded of $total_drawn sampled rows " *
+              "($(round(100 * rate; digits = 1))%) with non-finite values " *
+              "and redrew them. Rejection is not distribution-preserving, so " *
+              "treat the sample as slightly biased; the usual cause is an " *
+              "undertrained model."
     end
 
     x_num = d_num > 0 ? reduce(hcat, num_parts) : zeros(Float32, 0, n)
@@ -1980,17 +2019,19 @@ function sample(model::FittedDiffusionModel, n::Int;
     st_emb = _to_device(full_st.emb, gdev)
 
     # ── Draw class labels from the empirical distribution ──────────────
-    y_idx = if model.target === nothing || isempty(model.class_dist)
+    label_sampler = if model.target === nothing || isempty(model.class_dist)
         nothing
     else
         cdf = cumsum(model.class_dist)
-        [searchsortedfirst(cdf, rand(rng)) for _ in 1:n]
+        k -> [searchsortedfirst(cdf, rand(rng)) for _ in 1:k]
     end
+    y_idx = label_sampler === nothing ? nothing : label_sampler(n)
 
     # ── Reverse denoise (rejecting any non-finite rows) ────────────────
     x_num, x_cat, y_kept = _denoise_sample_finite(
         backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
-        sched, d_num, cat_dims, n, rng, y_idx)
+        sched, d_num, cat_dims, n, rng, y_idx;
+        draw_labels = label_sampler)
     y_kept !== nothing && (y_idx = y_kept)
 
     # Move results back to CPU for post-processing
