@@ -744,12 +744,32 @@ function _diffusion_loss(backbone, emb_layer, ps_backbone, ps_emb,
     output, st_bb_new = Lux.apply(backbone, (features, t_emb, y_batch),
                                   ps_backbone, st_backbone)
 
-    loss = 0f0
+    Lvec = _diffusion_loss_vec(output, log_x_cat_t, log_x_cat_start, coef,
+                               ε_true, d_num, plan, n_timesteps, log_K,
+                               lca_T, l1m_T)
+
+    return sum(Lvec) / size(output, 2), (st_bb_new, st_emb_new)
+end
+
+"""
+Per-example loss terms, as a `(1, B)` row — the loss of column `i` is the loss
+this model assigns to example `i` alone.
+
+Factored out of `_diffusion_loss` because ghost clipping needs two things the
+averaged scalar cannot give: the loss as a function of the network *output*
+only (so the gradient with respect to the output can be taken without touching
+parameters), and the *sum* rather than the mean over examples.  Backpropagating
+a sum of per-example terms yields exactly the per-example output-gradient at
+every layer, because example `i`'s activations influence only term `i`.
+"""
+function _diffusion_loss_vec(output, log_x_cat_t, log_x_cat_start, coef, ε_true,
+                             d_num, plan, n_timesteps, log_K, lca_T, l1m_T)
+    Lvec = nothing
 
     # ── Gaussian branch: mean_flat((ε - ε̂)²) ───────────────────────────
     if d_num > 0
         ε_pred = output[1:d_num, :]
-        loss += sum(abs2, ε_pred .- ε_true) / (d_num * size(output, 2))
+        Lvec = sum(abs2, ε_pred .- ε_true; dims = 1) ./ Float32(d_num)
     end
 
     # ── Multinomial branch: variational bound ──────────────────────────
@@ -770,11 +790,216 @@ function _diffusion_loss(backbone, emb_layer, ps_backbone, ps_emb,
 
         # Uniform timestep sampling ⇒ p_t = 1/T, so L_t / p_t = T · L_t
         vb = Lt .* Float32(n_timesteps) .+ _kl_prior(log_x_cat_start, log_K, lca_T, l1m_T)
-        loss += sum(vb) / (n_cat * size(output, 2))
+        cat_term = vb ./ Float32(n_cat)
+        Lvec = Lvec === nothing ? cat_term : Lvec .+ cat_term
     end
 
-    return loss, (st_bb_new, st_emb_new)
+    Lvec === nothing && return fill!(similar(output, 1, size(output, 2)), 0f0)
+    return Lvec
 end
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 6b. Ghost clipping — per-example gradient norms without per-example passes
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# DP-SGD needs each example's gradient norm in order to clip it individually.
+# The obvious implementation runs one backward pass per example, which is what
+# this replaces: at batch 256 that is 256 Zygote calls per optimizer step, and
+# a gradient call costs about the same whether it carries 1 row or 4096, so it
+# ran ~300x the cost of an ordinary epoch.
+#
+# Ghost clipping [Goodfellow 2015; Li et al. 2021, arXiv:2110.05679] never
+# materializes a per-example gradient. For a `Dense` layer with inputs `a`
+# (d_in, B) and output-gradients `g` (d_out, B), example i's weight gradient
+# is the outer product `g[:,i] * a[:,i]'`, so
+#
+#     ‖dL_i/dW‖²_F = ‖g_i‖² · ‖a_i‖²        ‖dL_i/db‖² = ‖g_i‖²
+#
+# — column norms, never the d_out×d_in matrix. Summing those over layers gives
+# every example's gradient norm, hence its clip factor c_i. The clipped sum is
+# then another pair of matmuls:
+#
+#     Σ_i c_i · g_i a_i'  =  (g .* c') * a'        Σ_i c_i · g_i  =  g * c
+#
+# Two batched passes replace B unbatched ones, and the result is *exactly* the
+# same clipped gradient sum — an algebraic identity, not an approximation.
+# The test suite pins that: it runs both paths over eight architectures and
+# asserts they agree to Float32 rounding. `_ghost_forward` mirrors
+# `(m::TabDDPMBackbone)(...)` by hand, so a change to one without the other is
+# exactly what that test exists to catch.
+#
+# The identity requires the loss to be a SUM of per-example terms, so that one
+# backward pass yields each example's own output-gradient at every layer.
+# That is what `_diffusion_loss_vec` provides.
+
+"""Derivative of activation `σ` at pre-activation `z`; `nothing` means 1."""
+function _act_deriv(σ, z)
+    σ === identity   && return nothing
+    σ === _fast_relu && return z .> 0f0
+    if σ === _fast_silu
+        sig = 1f0 ./ (1f0 .+ exp.(-z))
+        return sig .+ z .* sig .* (1f0 .- sig)
+    end
+    error("ghost clipping does not know the derivative of $σ")
+end
+
+_apply_deriv(dy, ::Nothing) = dy
+_apply_deriv(dy, d)         = dy .* d
+
+"""Squared column norms of a `(d, B)` matrix, as a `(1, B)` row."""
+_colsq(x) = sum(abs2, x; dims = 1)
+
+"""
+Whether this backbone can be ghost-clipped.
+
+Everything must be `Dense` with a known activation. Dropout is the practical
+exclusion: its mask would have to be captured and replayed in the manual
+backward pass, and `dropout` defaults to 0 anyway.
+"""
+function _ghost_supported(m::TabDDPMBackbone)
+    m.proj isa Lux.Dense || return false
+    all(l -> l isa Lux.Dense, values(m.mlp.layers)) || return false
+    all(l -> l isa Lux.Dense, values(m.time_embed.layers)) || return false
+    return true
+end
+
+"""
+Manual forward through the backbone, keeping the tensors the backward pass
+needs.
+
+Mirrors `(m::TabDDPMBackbone)(...)` exactly. Any change there has to be made
+here too — the equivalence check in `_train_dpsgd!` is what catches it if not.
+"""
+function _ghost_forward(m::TabDDPMBackbone, ps, features, t_emb, y)
+    tl = values(m.time_embed.layers)
+    tp = values(ps.time_embed)
+
+    n_te = length(tl)
+    z_te = Vector{Any}(undef, n_te)
+    te_in = Vector{Any}(undef, n_te)
+    x = t_emb
+    for i in 1:n_te
+        te_in[i] = x
+        z = tp[i].weight * x .+ tp[i].bias
+        z_te[i] = z
+        x = tl[i].activation === identity ? z : tl[i].activation.(z)
+    end
+    emb = x
+
+    lab = nothing
+    if y !== nothing && !(m.label_emb isa Lux.NoOpLayer)
+        lab = ps.label_emb.weight[:, y]
+        emb = emb .+ _fast_silu.(lab)
+    end
+
+    h = ps.proj.weight * features .+ ps.proj.bias .+ emb
+
+    ml = values(m.mlp.layers)
+    mp = values(ps.mlp)
+    n_ml = length(ml)
+    a_mlp = Vector{Any}(undef, n_ml)
+    z_mlp = Vector{Any}(undef, n_ml)
+    x = h
+    for i in 1:n_ml
+        a_mlp[i] = x
+        z = mp[i].weight * x .+ mp[i].bias
+        z_mlp[i] = z
+        x = ml[i].activation === identity ? z : ml[i].activation.(z)
+    end
+
+    return x, (; features, t_emb, y, lab, te_in, z_te, a_mlp, z_mlp)
+end
+
+"""
+Backward pass giving per-example squared gradient norms, plus a closure that
+builds the clipped gradient sum for a given row of clip factors.
+
+Two stages because the clip factors depend on the norms, which depend on the
+entire backward pass: walk back once caching `(a, g)` per layer, then form the
+sums.
+"""
+function _ghost_backward(m::TabDDPMBackbone, ps, cache, dout)
+    ml = values(m.mlp.layers); mp = values(ps.mlp); n_ml = length(ml)
+    tl = values(m.time_embed.layers); tp = values(ps.time_embed); n_te = length(tl)
+
+    g_mlp = Vector{Any}(undef, n_ml)
+    dy = dout
+    for i in n_ml:-1:1
+        g = _apply_deriv(dy, _act_deriv(ml[i].activation, cache.z_mlp[i]))
+        g_mlp[i] = g
+        dy = mp[i].weight' * g
+    end
+    dh = dy                                     # gradient at h
+
+    # h = proj(features) + emb, so both branches receive dh unchanged.
+    g_proj = dh
+
+    d_lab = cache.lab === nothing ? nothing :
+            dh .* _act_deriv(_fast_silu, cache.lab)
+
+    g_te = Vector{Any}(undef, n_te)
+    dy = dh
+    for i in n_te:-1:1
+        g = _apply_deriv(dy, _act_deriv(tl[i].activation, cache.z_te[i]))
+        g_te[i] = g
+        dy = tp[i].weight' * g
+    end
+
+    # ── Per-example squared norms ──────────────────────────────────────
+    # Dense contributes ‖g_i‖²·‖a_i‖² for the weight and ‖g_i‖² for the bias.
+    sq = _colsq(g_proj) .* (_colsq(cache.features) .+ 1f0)
+    for i in 1:n_ml
+        sq = sq .+ _colsq(g_mlp[i]) .* (_colsq(cache.a_mlp[i]) .+ 1f0)
+    end
+    for i in 1:n_te
+        sq = sq .+ _colsq(g_te[i]) .* (_colsq(cache.te_in[i]) .+ 1f0)
+    end
+    if d_lab !== nothing
+        # One-hot lookup: example i's gradient occupies a single column of the
+        # embedding table, so its squared norm is the incoming column's.
+        sq = sq .+ _colsq(d_lab)
+    end
+
+    function build(c)                            # c :: (1, B) clip factors
+        grads_mlp = ntuple(i -> (; weight = (g_mlp[i] .* c) * cache.a_mlp[i]',
+                                   bias   = vec(sum(g_mlp[i] .* c; dims = 2))), n_ml)
+        grads_te  = ntuple(i -> (; weight = (g_te[i] .* c) * cache.te_in[i]',
+                                   bias   = vec(sum(g_te[i] .* c; dims = 2))), n_te)
+        gpc = g_proj .* c
+        gp  = (; weight = gpc * cache.features',
+                 bias   = vec(sum(gpc; dims = 2)))
+
+        glabel = if d_lab === nothing
+            (;)
+        else
+            (; weight = _scatter_add_columns(ps.label_emb.weight, d_lab .* c, cache.y))
+        end
+
+        return (; proj = gp,
+                  time_embed = NamedTuple{keys(ps.time_embed)}(grads_te),
+                  label_emb = glabel,
+                  mlp = NamedTuple{keys(ps.mlp)}(grads_mlp))
+    end
+
+    return sq, build
+end
+
+"""
+`out[:, y[i]] = Σ over i of src[:, i]`, as a matmul against a one-hot matrix so
+it needs no scalar indexing and works unchanged on GPU.
+"""
+function _scatter_add_columns(W, src, y)
+    n_classes = size(W, 2)
+    y_host = Array(y)
+    oh = zeros(Float32, length(y_host), n_classes)
+    for (i, c) in enumerate(y_host)
+        oh[i, c] = 1f0
+    end
+    return src * _to_device(oh, _same_device(W))
+end
+
+# Move a host array onto whatever device `ref` lives on.
+_same_device(ref) = ref isa Array ? Lux.cpu_device() : Lux.gpu_device()
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 7. Gradient tree utilities
@@ -885,6 +1110,17 @@ The `do`-block convention places the closure first, so call sites read:
 function _compute_grad(loss_fn, ::Val{:zygote}, ps)
     (loss, aux), gs = Zygote.withgradient(loss_fn, ps)
     return loss, aux, gs[1]
+end
+
+"""
+Value and gradient of a scalar loss with respect to the network *output*.
+
+Ghost clipping differentiates the loss only as far as the output tensor and
+then walks the parameters by hand, so this touches no parameters at all.
+"""
+function _compute_output_grad(loss_fn, ::Val{:zygote}, out)
+    loss, gs = Zygote.withgradient(loss_fn, out)
+    return loss, gs[1]
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1183,12 +1419,57 @@ function _rdp_accountant(σ::Float64, q::Float64, steps::Int, delta::Float64)
     return best_eps
 end
 
+"""
+Per-example gradient clipping the direct way: one backward pass per example.
+
+Kept for two reasons. It is the fallback when `_ghost_supported` says no, and
+it is the definition ghost clipping is tested against — the test suite runs
+both over a range of architectures and asserts they agree, which is what makes
+the fast path trustworthy in privacy-critical code.
+
+Returns `(clipped_gradient_sum, summed_loss)`.
+"""
+function _dpsgd_grads_loop(backbone, emb_layer, ps_all, st_bb, st_emb,
+                           x_num_noised, log_x_cat_t, log_x_cat_start,
+                           ε, t_batch, idx, y_indices, conditional,
+                           sched, d_num, plan, T, log_K, lca_T, l1m_T,
+                           C, dev, bs)
+    gs_sum = _grad_zero(ps_all)
+    batch_loss = 0.0
+    empty1 = _to_device(zeros(Float32, 0, 1), dev)
+
+    for si in 1:bs
+        xn_i      = d_num > 0 ? x_num_noised[:, si:si] : empty1
+        xc_i      = size(log_x_cat_t, 1) > 0 ? log_x_cat_t[:, si:si] : empty1
+        xc_orig_i = size(log_x_cat_start, 1) > 0 ? log_x_cat_start[:, si:si] : empty1
+        ε_i       = d_num > 0 ? ε[:, si:si] : empty1
+        t_i_d     = _to_device(Float32.([t_batch[si] - 1]), dev)
+        y_i       = conditional ? _to_device(y_indices[idx[si]:idx[si]], dev) : nothing
+        coef_i    = _scalar_coefs(sched, t_batch[si])
+
+        l, _, g = _compute_grad(AD_BACKEND, ps_all) do p
+            _diffusion_loss(backbone, emb_layer,
+                            p.backbone, p.emb,
+                            st_bb, st_emb,
+                            xn_i, xc_i, xc_orig_i,
+                            t_i_d, coef_i, ε_i, d_num, plan,
+                            T, log_K, lca_T, l1m_T, y_i)
+        end
+        batch_loss += l
+        gnorm = sqrt(_grad_sqnorm(g))
+        gs_sum = _grad_add(gs_sum, _grad_scale(g, min(1.0, C / max(gnorm, 1e-12))))
+    end
+
+    return gs_sum, batch_loss
+end
+
 function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
                        st_bb, st_emb,
                        X_num, X_cat_oh, y_indices,
                        sched, cat_dims, d_num,
                        epochs, batch_size, lr, lr_warmup,
-                       weight_decay, privacy, rng, dev)
+                       weight_decay, privacy, rng, dev;
+                       force_loop::Bool = false)
     T     = sched.T
     nrows = size(X_num, 2) > 0 ? size(X_num, 2) : size(X_cat_oh, 2)
     log_K = _to_device(_log_K_vector(cat_dims), dev)
@@ -1197,6 +1478,16 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
     lca_T = Float32(sched.log_cumprod_alpha[T])
     l1m_T = Float32(sched.log_1_min_cumprod_alpha[T])
     conditional = !isempty(y_indices)
+
+    # Ghost clipping replaces the per-example gradient loop (section 6b). It
+    # needs every layer to be Dense with a known activation; dropout would
+    # require capturing and replaying the mask in the manual backward pass.
+    # `force_loop` exists so the two paths can be compared end to end; nothing
+    # in the package sets it.
+    use_ghost = !force_loop && _ghost_supported(backbone)
+    (use_ghost || force_loop) || @warn "DP-SGD is falling back to one backward pass per " *
+                       "example: this backbone has layers ghost clipping " *
+                       "cannot handle (dropout > 0?). Expect it to be very slow."
 
     # DP-SGD parameters (REQ-DIF-005)
     C = 1.0                                     # gradient clip norm
@@ -1285,32 +1576,44 @@ function _train_dpsgd!(backbone, emb_layer, ps_bb, ps_emb,
                 log_x_cat_t     = log_x_cat_start
             end
 
-            # ── Per-sample gradient clipping ────────────────────────────
-            gs_sum = _grad_zero(ps_all)
-            batch_loss = 0.0
-
-            for si in 1:bs
-                xn_i  = d_num > 0 ? x_num_noised[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
-                xc_i  = size(log_x_cat_t, 1) > 0 ? log_x_cat_t[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
-                xc_orig_i = size(log_x_cat_start, 1) > 0 ? log_x_cat_start[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
-                t_i_d = _to_device(Float32.([t_batch[si] - 1]), dev)
-                ε_i   = d_num > 0 ? ε[:, si:si] : _to_device(zeros(Float32, 0, 1), dev)
-                y_i   = conditional ? _to_device(y_indices[idx[si]:idx[si]], dev) : nothing
-                coef_i = _scalar_coefs(sched, t_batch[si])
-
-                l, _, g = _compute_grad(AD_BACKEND, ps_all) do p
-                    _diffusion_loss(backbone, emb_layer,
-                                    p.backbone, p.emb,
-                                    st_bb, st_emb,
-                                    xn_i, xc_i, xc_orig_i,
-                                    t_i_d, coef_i, ε_i, d_num, plan,
-                                    T, log_K, lca_T, l1m_T, y_i)
+            # ── Per-example gradient clipping ───────────────────────────
+            #
+            # Ghost clipping: two batched passes give every example's gradient
+            # norm and the clipped sum exactly, without a gradient call per
+            # example.  See section 6b.  `_train_standard!`-style batching is
+            # not an option here — DP requires each example clipped on its own
+            # norm — but the norms are recoverable from column norms alone.
+            batch_coef_g = _batch_coefs(sched_d, _to_device(t_batch, dev))
+            gs_sum, batch_loss = if use_ghost
+                t_emb, _ = Lux.apply(emb_layer,
+                                     _to_device(Float32.(t_batch .- 1), dev),
+                                     ps_all.emb, st_emb)
+                features = if d_num > 0 && plan !== nothing
+                    vcat(x_num_noised, log_x_cat_t)
+                elseif d_num > 0
+                    x_num_noised
+                else
+                    log_x_cat_t
                 end
-                batch_loss += l
-                gnorm = sqrt(_grad_sqnorm(g))
-                clip_factor = min(1.0, C / max(gnorm, 1e-12))
-                g_clipped = _grad_scale(g, clip_factor)
-                gs_sum = _grad_add(gs_sum, g_clipped)
+                y_b = conditional ? _to_device(y_indices[idx], dev) : nothing
+
+                out, cache = _ghost_forward(backbone, ps_all.backbone,
+                                            features, t_emb, y_b)
+                total_loss, dout = _compute_output_grad(AD_BACKEND, out) do o
+                    sum(_diffusion_loss_vec(o, log_x_cat_t, log_x_cat_start,
+                                            batch_coef_g, ε, d_num, plan, T,
+                                            log_K, lca_T, l1m_T))
+                end
+                sq, build = _ghost_backward(backbone, ps_all.backbone, cache, dout)
+                cvec = min.(1f0, Float32(C) ./ max.(sqrt.(sq), 1f-12))
+                ((; backbone = build(cvec), emb = _grad_zero(ps_all.emb)),
+                 Float64(total_loss))
+            else
+                _dpsgd_grads_loop(backbone, emb_layer, ps_all, st_bb, st_emb,
+                                  x_num_noised, log_x_cat_t, log_x_cat_start,
+                                  ε, t_batch, idx, y_indices, conditional,
+                                  sched, d_num, plan, T, log_K, lca_T, l1m_T,
+                                  C, dev, bs)
             end
 
             epoch_loss += batch_loss / bs
@@ -1582,27 +1885,15 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
     # ── Detect device (GPU if available) ─────────────────────────────
     gdev, cdev = _get_devices()
 
-    # DP-SGD trains on the CPU even when a GPU is present, which is not a
-    # typo.  Its per-example gradient clipping makes every backward pass a
-    # batch of one, and a GPU's cost per gradient call is almost entirely
-    # launch overhead: measured at ~20 ms whether the batch is 1 or 4096, and
-    # whether the model has 0.3M parameters or 5M.  The CPU does the same
-    # batch-of-one call in 1.2-15 ms depending on width, so it wins on every
-    # architecture tested.
-    #
-    #   DP-SGD, 4k rows, batch 256   GPU 73.17 s/epoch   CPU 5.87 s/epoch
-    #
-    # Standard training is batched and goes the other way by a wide margin
-    # (0.214 s/epoch on GPU against 4.054 s/epoch on CPU for the paper's
-    # architecture at batch 4096), so only the DP path is redirected.
-    #
-    # If the per-example loop is ever replaced by ghost clipping, the work
-    # becomes batched and this should revert to `gdev`.
-    train_dev = gen.dp ? cdev : gdev
+    # Both paths are batched now, so both belong on the GPU.  Before ghost
+    # clipping, DP-SGD ran one backward pass per example, and a GPU's cost per
+    # gradient call is almost entirely launch overhead — ~20 ms whether the
+    # batch holds 1 row or 4096 — so that version was faster on the CPU.  With
+    # the work batched the GPU wins again by 1.3x to 11x depending on batch
+    # size and width.
+    train_dev = gdev
 
     @info "DiffusionGenerator: training on $(train_dev)" *
-          (gen.dp && train_dev !== gdev ?
-              " (DP-SGD is batch-of-one work; the CPU is ~12x faster here)" : "") *
           (n_classes > 0 ? " (class-conditional on :$(gen.target), $n_classes classes)" : "")
 
     # ── Train ──────────────────────────────────────────────────────────

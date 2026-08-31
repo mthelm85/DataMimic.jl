@@ -1185,6 +1185,130 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
     end
 
     # ════════════════════════════════════════════════════════════════════════
+    # Ghost clipping equals the per-example loop
+    # ════════════════════════════════════════════════════════════════════════
+    #
+    # DP-SGD's fast path computes per-example gradient norms and the clipped
+    # gradient sum from column norms and two matmuls, instead of one backward
+    # pass per example. That is an algebraic identity, so the two must agree to
+    # floating-point rounding — and if they ever stop agreeing, the privacy
+    # guarantee is what breaks, silently. `_ghost_forward` mirrors
+    # `TabDDPMBackbone` by hand, so this is also what catches a change to one
+    # without the other.
+    @testset "ghost clipping matches per-example gradients" begin
+        Ext = Base.get_extension(DataMimic, :DataMimicLuxExt)
+        dev = Lux.cpu_device()
+
+        function worst_reldiff(a, b)
+            worst = 0.0
+            function walk(x, y)
+                if x isa NamedTuple
+                    for k in keys(x); walk(getfield(x, k), getfield(y, k)); end
+                elseif x isa AbstractArray
+                    sc = max(maximum(abs, x), maximum(abs, y), 1e-8)
+                    worst = max(worst, maximum(abs.(x .- y)) / sc)
+                end
+            end
+            walk(a, b)
+            worst
+        end
+
+        function compare_paths(; d_num, cat_dims, bs, d_layers, n_classes, T = 50, seed = 1)
+            rng = MersenneTwister(seed)
+            d_cat = sum(cat_dims; init = 0)
+            plan  = isempty(cat_dims) ? nothing : Ext._block_plan(cat_dims, dev)
+            log_K = isempty(cat_dims) ? Float32[] : Ext._log_K_vector(cat_dims)
+            betas, _ = Ext._cosine_schedule(T)
+            sched = Ext._schedule_constants(betas)
+            lca_T = Float32(sched.log_cumprod_alpha[T])
+            l1m_T = Float32(sched.log_1_min_cumprod_alpha[T])
+
+            backbone, _ = Ext._build_model(d_num + d_cat, d_num, cat_dims;
+                d_layers = d_layers, embed_dim = 32, dropout = 0.0,
+                n_classes = n_classes)
+            emb_layer = Ext.SinusoidalEmbedding(32)
+            ps_bb, st_bb = Lux.setup(rng, backbone)
+            ps_em, st_em = Lux.setup(rng, emb_layer)
+            ps_all = (; backbone = ps_bb, emb = ps_em)
+
+            x_oh = zeros(Float32, d_cat, bs)
+            if d_cat > 0
+                off = 0
+                for K in cat_dims
+                    for b in 1:bs; x_oh[off + rand(rng, 1:K), b] = 1f0; end
+                    off += K
+                end
+            end
+            log_x0 = d_cat > 0 ? Ext._to_log_onehot(x_oh) : zeros(Float32, 0, bs)
+            tvec   = rand(rng, 1:T, bs)
+            coef_b = Ext._batch_coefs(Ext._device_schedule(sched, dev), tvec)
+            log_xt = d_cat > 0 ?
+                Ext._multinomial_q_sample(log_x0, plan, coef_b, log_K, rng, dev) :
+                zeros(Float32, 0, bs)
+            xnum = randn(rng, Float32, d_num, bs)
+            eps  = randn(rng, Float32, d_num, bs)
+            yidx = n_classes > 0 ? rand(rng, 1:n_classes, bs) : Int[]
+            C = 1.0
+
+            ref, _ = Ext._dpsgd_grads_loop(backbone, emb_layer, ps_all, st_bb, st_em,
+                        xnum, log_xt, log_x0, eps, tvec, collect(1:bs), yidx,
+                        n_classes > 0, sched, d_num, plan, T, log_K, lca_T, l1m_T,
+                        C, dev, bs)
+
+            t_emb, _ = Lux.apply(emb_layer, Float32.(tvec .- 1), ps_em, st_em)
+            features = d_num > 0 && d_cat > 0 ? vcat(xnum, log_xt) :
+                       (d_num > 0 ? xnum : log_xt)
+            y_dev = n_classes > 0 ? yidx : nothing
+            out, cache = Ext._ghost_forward(backbone, ps_bb, features, t_emb, y_dev)
+            _, dout = Ext._compute_output_grad(Ext.AD_BACKEND, out) do o
+                sum(Ext._diffusion_loss_vec(o, log_xt, log_x0, coef_b, eps,
+                                            d_num, plan, T, log_K, lca_T, l1m_T))
+            end
+            sq, build = Ext._ghost_backward(backbone, ps_bb, cache, dout)
+            cvec = min.(1f0, Float32(C) ./ max.(sqrt.(sq), 1f-12))
+            return worst_reldiff(build(cvec), ref.backbone)
+        end
+
+        @test compare_paths(d_num = 4, cat_dims = Int[],   bs = 24, d_layers = [16,16], n_classes = 0) < 1e-4
+        @test compare_paths(d_num = 0, cat_dims = [3,5,4], bs = 24, d_layers = [16,16], n_classes = 0) < 1e-4
+        @test compare_paths(d_num = 4, cat_dims = [3,5,4], bs = 24, d_layers = [16,16], n_classes = 0) < 1e-4
+        @test compare_paths(d_num = 4, cat_dims = [3,5,4], bs = 24, d_layers = [32,16,8], n_classes = 0) < 1e-4
+        @test compare_paths(d_num = 3, cat_dims = [4,2],   bs = 24, d_layers = [16,16], n_classes = 3) < 1e-4
+        @test compare_paths(d_num = 4, cat_dims = [3,5],   bs = 24, d_layers = [16],    n_classes = 0) < 1e-4
+        @test compare_paths(d_num = 2, cat_dims = [9,7,6,5,2], bs = 32, d_layers = [16,16], n_classes = 0) < 1e-4
+
+        # And the whole training loop agrees, not just one step.
+        @testset "end to end" begin
+            n = 400; d_num = 2; cat_dims = [4, 3]; d_cat = sum(cat_dims); T = 30
+            r0 = MersenneTwister(9)
+            X_num = randn(r0, Float32, d_num, n)
+            X_cat = zeros(Float32, d_cat, n)
+            off = 0
+            for K in cat_dims
+                for b in 1:n; X_cat[off + rand(r0, 1:K), b] = 1f0; end
+                off += K
+            end
+            betas, _ = Ext._cosine_schedule(T)
+            sched = Ext._schedule_constants(betas)
+
+            function trained(force_loop)
+                r = MersenneTwister(9)
+                bb, _ = Ext._build_model(d_num + d_cat, d_num, cat_dims;
+                            d_layers = [32, 32], embed_dim = 16, dropout = 0.0,
+                            n_classes = 0)
+                em = Ext.SinusoidalEmbedding(16)
+                sr = MersenneTwister(9)
+                pb, sb = Lux.setup(sr, bb); pe, se = Lux.setup(sr, em)
+                Ext._train_dpsgd!(bb, em, pb, pe, sb, se, X_num, X_cat, Int[],
+                                  sched, cat_dims, d_num, 3, 128, 1e-3, 0, 1e-4,
+                                  PrivacyBudget(epsilon = 10.0), r, dev;
+                                  force_loop = force_loop)
+            end
+            @test worst_reldiff(trained(false)[1], trained(true)[1]) < 1e-4
+        end
+    end
+
+    # ════════════════════════════════════════════════════════════════════════
     # Per-block log-softmax stability
     # ════════════════════════════════════════════════════════════════════════
     #

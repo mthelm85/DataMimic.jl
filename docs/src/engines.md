@@ -138,15 +138,18 @@ usually resolves it.
 **Privacy.** `dp = true` trains with DP-SGD and requires a budget; see
 [Privacy](privacy.md).
 
-DP-SGD trains on the CPU even when a GPU is available, which is deliberate.
-Per-example gradient clipping makes every backward pass a batch of one, and a
-GPU's cost per gradient call is almost entirely launch overhead — around 20 ms
-whether the batch holds 1 row or 4096. The CPU does the same batch-of-one call
-several times faster, which came to roughly 10× end to end. Standard training
-is batched and goes the other way by a wide margin, so it still uses the GPU.
+DP training is slower than ordinary training but no longer dramatically so.
+Clipping each example's gradient individually appears to require one backward
+pass per example; it does not. For a `Dense` layer, example *i*'s weight
+gradient is an outer product, so its norm is the product of two column norms —
+which means every example's norm, and the clipped sum, come out of two batched
+passes rather than *B* unbatched ones. This is *ghost clipping* (Goodfellow
+2015; Li et al. 2021), and it is an exact identity rather than an
+approximation: DataMimic's tests assert the two agree to floating-point
+rounding, both per step and over a full training run.
 
-Expect DP training to be slow regardless: a per-example loop costs on the
-order of 100× a batched epoch. Budget accordingly, and start with few epochs.
+Larger batches make DP training *cheaper* per epoch, as they do for ordinary
+training — the opposite of the per-example behaviour.
 
 **References.** Kotelnikov et al., *TabDDPM* (ICML 2023,
 [arXiv:2209.15421](https://arxiv.org/abs/2209.15421)), cross-checked against

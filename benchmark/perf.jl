@@ -210,14 +210,15 @@ function build_cases()
             () -> sample(m, 10_000; rng = RNG()), reps = 3))
     end
 
-    # DP-SGD is gated behind --slow: its per-example gradient loop makes it
-    # ~300x the cost of standard training per epoch, so it is far too slow to
-    # sit in the default run.
-    let g = DiffusionGenerator(; dp = true, epochs = 1, batch_size = 256,
+    # DP-SGD used to be gated behind --slow, at ~300x the cost of standard
+    # training per epoch. Ghost clipping brought it within a small multiple of
+    # the ordinary path, so it runs by default — and this case is what would
+    # catch a regression back to per-example gradients.
+    let g = DiffusionGenerator(; dp = true, epochs = 2, batch_size = 1024,
                                d_layers = [256, 256], num_timesteps = 100)
-        push!(cs, Case("diffusion/fit_dpsgd_1ep", "diffusion",
-            () -> fit(g, TBL_SMALL; privacy = PrivacyBudget(epsilon = 10.0), rng = RNG()),
-            reps = 2, slow = true))
+        push!(cs, Case("diffusion/fit_dpsgd_2ep", "diffusion",
+            () -> fit(g, TBL_MED; privacy = PrivacyBudget(epsilon = 10.0), rng = RNG()),
+            reps = 3))
     end
 
     # Evaluation metrics — cheap individually, but `compare` calls them once
@@ -302,7 +303,6 @@ function main()
     println("  device : $DEVICE_NAME")
     println("  machine: $(machine_id())")
     println("  julia  : $VERSION")
-    RUN_SLOW || println("  (DP-SGD case skipped; pass --slow to include it)")
     println()
 
     baseline = load_baseline()

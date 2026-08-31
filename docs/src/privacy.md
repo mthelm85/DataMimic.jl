@@ -41,9 +41,9 @@ mechanisms — the naive ε-per-step accounting would be far more pessimistic.
   the private covariance matrix.
 - **[`DiffusionGenerator`](@ref)`(dp = true)`** trains with DP-SGD —
   per-example gradient clipping plus Gaussian noise — accounted with Rényi DP
-  over Poisson-subsampled minibatches. Per-example clipping makes this far
-  slower than ordinary training, and it runs on the CPU for the reason given
-  under [DiffusionGenerator](engines.md#DiffusionGenerator).
+  over Poisson-subsampled minibatches. Per-example clipping is done by ghost
+  clipping, which gets each example's gradient norm without a backward pass
+  per example; see [DiffusionGenerator](engines.md#DiffusionGenerator).
 
 Sampling from a fitted private model is post-processing: draw as many synthetic
 rows as you like without spending anything more. This is a genuine property of
