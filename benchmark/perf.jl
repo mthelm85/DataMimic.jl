@@ -31,6 +31,13 @@
 #   5. Warm every case before timing any of them. Per-case warmup does not
 #      cover process-level lazy initialization, which lands on whichever case
 #      happens to run first.
+#   6. Repeat sub-millisecond cases until each sample clears the clock's
+#      resolution. `time()` on Windows is coarse enough that a 1 ms case reads
+#      as 1 ms or 2 ms, which is a 100% "regression" from rounding alone.
+#   7. Report median drift across all cases. A machine under load slows
+#      everything at once; without that summary it looks like ten independent
+#      regressions, which is exactly what happened the first time this ran
+#      after a real change.
 #   4. Record the machine and device in the baseline, and refuse to compare
 #      across different ones. CPU and GPU differ by up to 28x on the same
 #      case in opposite directions depending on batch size.
@@ -56,6 +63,10 @@ const FILTER     = something(findfirst(a -> startswith(a, "--filter="), ARGS), 0
 const REGRESS_FACTOR   = 1.25
 const IMPROVE_FACTOR   = 0.80
 const BASELINE_PATH    = joinpath(@__DIR__, "perf_baseline.toml")
+
+# Each timed sample must span at least this long, so clock resolution cannot
+# dominate. Cheap cases are looped internally and the total divided out.
+const MIN_SAMPLE_SECONDS = 0.05
 
 # ── Device ─────────────────────────────────────────────────────────────────
 
@@ -100,13 +111,21 @@ predecessor.
 function measure(case::Case)
     case.f()                       # warm up: compile, allocate, populate caches
     sync()
+
+    # Pick an inner repeat count so each sample clears the clock's resolution.
+    t0 = time(); case.f(); sync()
+    single = max(time() - t0, 1e-9)
+    k = max(1, ceil(Int, MIN_SAMPLE_SECONDS / single))
+
     times = Float64[]
     for _ in 1:case.reps
         sync()                     # drain anything still pending BEFORE timing
         t0 = time()
-        case.f()
+        for _ in 1:k
+            case.f()
+        end
         sync()                     # and only then stop the clock
-        push!(times, time() - t0)
+        push!(times, (time() - t0) / k)
     end
     return median(times), minimum(times), maximum(times)
 end
@@ -308,6 +327,7 @@ function main()
 
     results = Tuple{String,Float64,Float64,Float64}[]
     regressions = String[]
+    ratios = Float64[]
 
     @printf("%-34s %10s %10s %10s   %s\n", "case", "median", "min", "max", "vs baseline")
     println("─"^88)
@@ -327,6 +347,7 @@ function main()
             b = Float64(get(bc, "min", get(bc, "median", NaN)))
             ratio = lo / b
             pct = (ratio - 1) * 100
+            push!(ratios, ratio)
             if ratio > REGRESS_FACTOR
                 note = @sprintf("REGRESSED %+.0f%% (was %.3fs)", pct, b)
                 push!(regressions, c.name)
@@ -339,6 +360,22 @@ function main()
             note = "new"
         end
         @printf("  %-32s %9.3fs %9.3fs %9.3fs   %s\n", c.name, med, lo, hi, note)
+    end
+
+    # A machine under load slows every case at once. Reporting that as N
+    # independent regressions is misleading, so summarize the drift and let
+    # the reader judge. Deliberately does not adjust the gate: normalizing
+    # away the median would hide a change that genuinely slowed everything.
+    if !isempty(ratios)
+        drift = median(ratios)
+        if drift > 1.10 || drift < 0.90
+            println()
+            @printf("NOTE: the median case is %+.0f%% against baseline.
+", (drift - 1) * 100)
+            println("A uniform shift across unrelated cases usually means machine state")
+            println("(load, thermal, power profile) rather than a code change. Re-run on")
+            println("an idle machine before believing any individual regression below.")
+        end
     end
 
     println()

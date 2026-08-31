@@ -1158,6 +1158,99 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
     end
 
     # ════════════════════════════════════════════════════════════════════════
+    # Learning-rate annealing
+    # ════════════════════════════════════════════════════════════════════════
+    #
+    # The reference counts steps from zero, so lr runs from lr_max down to
+    # lr_max/total and never hits zero. Using the 1-based epoch directly made
+    # the last epoch of every run train at exactly 0, and `epochs = 1` a
+    # complete no-op.
+    @testset "anneal_lr" begin
+        Ext = Base.get_extension(DataMimic, :DataMimicLuxExt)
+        lr = 1e-3
+
+        @test Ext._anneal_lr(1, 1, lr, 0) > 0            # epochs=1 must train
+        @test Ext._anneal_lr(1, 10, lr, 0) ≈ lr          # starts at lr_max
+        @test Ext._anneal_lr(10, 10, lr, 0) ≈ lr / 10    # ends at lr_max/total
+        for E in (1, 2, 5, 20)
+            sched = [Ext._anneal_lr(e, E, lr, 0) for e in 1:E]
+            @test all(>(0), sched)
+            @test issorted(sched; rev = true)
+            @test maximum(sched) ≈ lr
+        end
+        # Warmup ramps up before the anneal, and never goes negative.
+        wsched = [Ext._anneal_lr(e, 6, lr, 2) for e in 1:6]
+        @test wsched[1] < wsched[2]
+        @test all(>=(0), wsched)
+    end
+
+    # ════════════════════════════════════════════════════════════════════════
+    # Per-block log-softmax stability
+    # ════════════════════════════════════════════════════════════════════════
+    #
+    # `_block_log_normalize` once subtracted a single GLOBAL maximum, on the
+    # assumption that its inputs are log-probabilities. `_predict_start` calls
+    # it on raw network logits, which at initialization span roughly ±100, so
+    # a block sitting far below the global maximum underflowed to zero across
+    # all its rows: block sum 0, log(0) = -Inf, z - (-Inf) = +Inf, and every
+    # downstream KL became NaN.
+    #
+    # It needs several blocks AND a wide batch to appear — a single block is
+    # always safe, because then the global maximum is the block maximum.
+    @testset "block log-softmax stability" begin
+        Ext = Base.get_extension(DataMimic, :DataMimicLuxExt)
+        dev = Lux.cpu_device()
+
+        # Reference: the obvious per-block log-softmax.
+        function ref_lognorm(x, dims)
+            out = similar(x); off = 0
+            for K in dims
+                blk = @view x[off+1:off+K, :]
+                m = maximum(blk; dims = 1)
+                z = blk .- m
+                out[off+1:off+K, :] = z .- log.(sum(exp.(z); dims = 1))
+                off += K
+            end
+            out
+        end
+
+        for dims in ([3], [12, 12, 12], [9, 16, 7, 15, 6, 5, 2])
+            plan = Ext._block_plan(dims, dev)
+            for sd in (1f0, 40f0, 100f0)
+                x = randn(MersenneTwister(3), Float32, sum(dims), 512) .* sd
+                got = Ext._block_log_normalize(x, plan)
+                @test all(isfinite, got)
+                @test maximum(abs.(got .- ref_lognorm(x, dims))) < 1f-3
+                # Every block must be a proper distribution.
+                p = exp.(got); off = 0
+                for K in dims
+                    @test all(abs.(sum(p[off+1:off+K, :]; dims = 1) .- 1f0) .< 1f-4)
+                    off += K
+                end
+            end
+        end
+    end
+
+    # A table with enough categorical columns, trained at a wide batch: the
+    # end-to-end shape of the NaN above.
+    @testset "diffusion trains on many categorical columns" begin
+        n = 2_000
+        rng = MersenneTwister(7)
+        cols = Dict{Symbol,Any}()
+        for j in 1:3; cols[Symbol("num", j)] = randn(rng, n); end
+        for (j, K) in enumerate([9, 16, 7, 15, 6, 5, 2])
+            cols[Symbol("cat", j)] = rand(rng, string.(1:K), n)
+        end
+        tbl = NamedTuple(cols)
+        model = fit(DiffusionGenerator(epochs = 2, batch_size = 1024,
+                                       d_layers = [64, 64], num_timesteps = 50),
+                    tbl; rng = MersenneTwister(1))
+        @test model isa FittedDiffusionModel
+        syn = sample(model, 200; rng = MersenneTwister(2))
+        @test length(syn.num1) == 200
+    end
+
+    # ════════════════════════════════════════════════════════════════════════
     #  P H A S E   4  —  E V A L U A T I O N   S U I T E
     # ════════════════════════════════════════════════════════════════════════
 

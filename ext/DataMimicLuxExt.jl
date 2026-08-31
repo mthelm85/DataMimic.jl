@@ -384,12 +384,26 @@ Normalize each categorical block to log-probabilities (per-block log-softmax).
 Equivalent to `x - sliced_logsumexp(x)` in the reference implementation.
 
 The per-block sum is computed as two matmuls against the block-membership
-matrix, which keeps this to a handful of cuBLAS/elementwise kernels.  A single
-global maximum is enough to stabilize `exp`: these are log-probabilities, so
-the shifted values stay well inside Float32 range.
+matrix, which keeps this to a handful of cuBLAS/elementwise kernels.
+
+The shift subtracted before `exp` is the **per-block** maximum, not a global
+one.  An earlier version used `maximum(x)` over the whole matrix, on the
+stated assumption that the inputs are already log-probabilities and so sit in
+a narrow range.  That assumption is false: `_predict_start` calls this on raw
+network logits, which at initialization span roughly ±100.  A block whose
+logits all sit far below the global maximum then underflows to zero across
+every one of its rows, so the block sum is 0, `log(0)` is `-Inf`, and
+`z - (-Inf)` is `+Inf` — which turns `_p_pred`, the KL, and the whole loss
+into `NaN`.
+
+It needed several categorical columns and a large batch to show up (one block
+is safe, because then the global maximum *is* the block maximum), which is why
+it survived until a table with 6+ categorical columns was trained at batch
+4096.  Do not revert this to a global maximum for speed.
 """
 function _block_log_normalize(x, plan)
-    z = x .- maximum(x)
+    blockmax = maximum(_to_padded(x, plan); dims = 1)          # (1, n_cat, B)
+    z = x .- plan.Bt * reshape(blockmax, plan.n_cat, :)        # broadcast to rows
     s = plan.Bt * (plan.B * exp.(z))     # block sums, broadcast back over rows
     return z .- log.(s)
 end
@@ -908,6 +922,12 @@ Linear learning-rate annealing, matching `_anneal_lr` in the reference code:
 
     lr = lr_max · (1 - step / total_steps)
 
+The reference counts `step` from zero, so its learning rate runs from `lr_max`
+down to `lr_max / total_steps` and never reaches zero.  `epoch` here is
+1-based, so the fraction uses `epoch - 1`.  Using `epoch` directly — as this
+did — made the *final* epoch of every run train at exactly zero, and made
+`epochs = 1` a complete no-op: one epoch, at lr 0, updating nothing.
+
 `warmup` epochs, when requested, linearly ramp from `lr_max/10` to `lr_max`
 before the anneal begins; with `warmup == 0` this is exactly the paper's
 schedule.
@@ -916,7 +936,7 @@ function _anneal_lr(epoch::Int, total_epochs::Int, lr_max::Float64, warmup::Int)
     if warmup > 0 && epoch <= warmup
         return lr_max * (0.1 + 0.9 * (epoch - 1) / max(warmup - 1, 1))
     end
-    done = (epoch - warmup) / max(total_epochs - warmup, 1)
+    done = (epoch - 1 - warmup) / max(total_epochs - warmup, 1)
     return lr_max * max(1.0 - done, 0.0)
 end
 
