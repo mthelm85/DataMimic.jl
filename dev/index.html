@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DataMimic.jl — DataMimic.jl</title>
-  <link rel="stylesheet" href="./assets/materialdocs.css?v=c6e93cb4">
+  <link rel="stylesheet" href="./assets/materialdocs.css?v=691d0936">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="./assets/favicon.png">
   <script>
@@ -37,6 +37,7 @@
   <div class="md-layout">
     <nav class="md-sidebar">
       <a href="./">Home</a>
+      <a href="./data/">Your data</a>
       <a href="./engines/">Engines</a>
       <a href="./privacy/">Privacy</a>
       <a href="./evaluation/">Evaluation</a>
@@ -46,15 +47,17 @@
       <article class="md-article">
 <h1 id="DataMimic.jl" class="md-heading">DataMimic.jl<a href="#DataMimic.jl" class="md-heading-anchor" aria-label="Link to this section">#</a></h1>
 <p>Synthetic tabular data generation for Julia, with optional differential privacy.</p>
-<p>DataMimic fits a generative model to a table and samples new rows preserving its statistical structure without copying real records. Four engines sit behind one <code class="md-code-inline">fit</code> / <code class="md-code-inline">sample</code> interface, alongside an evaluation suite for checking that the output is actually usable.</p>
-<p>Any <a href="https://github.com/JuliaData/Tables.jl">Tables.jl</a>-compatible table works as input, and <code class="md-code-inline">sample</code> returns the same concrete table type you passed in.</p>
+<p>DataMimic fits a generative model to a table and draws new rows from it. The synthetic rows are not copies or perturbations of real ones: they are samples from a distribution estimated from your data, so column distributions and the relationships between columns are preserved while individual records are not.</p>
+<p>That makes it useful when the real table cannot be shared — for a public release, a demo, a test fixture, or a collaborator outside the data-sharing agreement — and when you need more rows than you have.</p>
+<p>Four engines sit behind one <code class="md-code-inline">fit</code> / <code class="md-code-inline">sample</code> interface, three of them offering formal (ε, δ)-differential privacy. An evaluation suite measures how well the result holds up, because a synthetic table that looks plausible can still be useless for the analysis you intend to run on it.</p>
+<p>Any <a href="https://github.com/JuliaData/Tables.jl">Tables.jl</a>-compatible table works as input — <code class="md-code-inline">DataFrame</code>, <code class="md-code-inline">NamedTuple</code> of vectors, <code class="md-code-inline">CSV.File</code>, and so on — and <code class="md-code-inline">sample</code> returns the same concrete type you passed in.</p>
 <h2 id="Installation" class="md-heading">Installation<a href="#Installation" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
 <pre><code class="language-julia">using Pkg
 Pkg.add(url = &quot;https://github.com/mthelm85/DataMimic.jl&quot;)</code></pre>
 </div>
-<p><a href="./api/#DataMimic.DiffusionGenerator"><code class="md-code-inline">DiffusionGenerator</code></a> lives in a package extension; load <code class="md-code-inline">Lux</code> and <code class="md-code-inline">Zygote</code> to activate it. For GPU training additionally load <code class="md-code-inline">LuxCUDA</code> (or <code class="md-code-inline">Metal.jl</code> / <code class="md-code-inline">AMDGPU.jl</code>) — the device is detected at runtime and DataMimic takes no GPU dependency itself.</p>
+<p><a href="./api/#DataMimic.DiffusionGenerator"><code class="md-code-inline">DiffusionGenerator</code></a> lives in a package extension. Load <code class="md-code-inline">Lux</code> and <code class="md-code-inline">Zygote</code> alongside DataMimic to activate it; without them the other three engines work as normal. For GPU training also load <code class="md-code-inline">LuxCUDA</code> (or <code class="md-code-inline">Metal.jl</code> / <code class="md-code-inline">AMDGPU.jl</code>) — the device is detected at runtime, and DataMimic itself takes no GPU dependency.</p>
 <h2 id="Quick-start" class="md-heading">Quick start<a href="#Quick-start" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
@@ -69,16 +72,33 @@ df = DataFrame(
 model = fit(CopulaGenerator(), df)
 syn   = sample(model, 500)</code></pre>
 </div>
-<p>With a privacy budget:</p>
+<p><code class="md-code-inline">fit</code> inspects the table, classifies each column, and estimates the model. <code class="md-code-inline">sample</code> draws however many rows you ask for — more than the original if you want them.</p>
+<p>To fit and sample in one step:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">syn = synthesize(CopulaGenerator(), df, 500)</code></pre>
+</div>
+<h3 id="With-differential-privacy" class="md-heading">With differential privacy<a href="#With-differential-privacy" class="md-heading-anchor" aria-label="Link to this section">#</a></h3>
+<p>Private engines require a <a href="./api/#DataMimic.PrivacyBudget"><code class="md-code-inline">PrivacyBudget</code></a>; public ones reject it rather than accepting it and quietly providing no guarantee.</p>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
 <pre><code class="language-julia">budget = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
 model  = fit(MSTGenerator(), df; privacy = budget)
 syn    = sample(model, 500)</code></pre>
 </div>
+<p>Drawing samples from a fitted private model costs nothing further, however many rows you take. See <a href="./privacy/">Privacy</a>.</p>
+<h3 id="Choosing-an-engine" class="md-heading">Choosing an engine<a href="#Choosing-an-engine" class="md-heading-anchor" aria-label="Link to this section">#</a></h3>
+<p>There is no engine that wins everywhere, and which one suits a table is not reliably predictable from its shape. <a href="./api/#DataMimic.Evaluate.compare"><code class="md-code-inline">compare</code></a> fits several to your own data and reports how each did:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator()], df;
+        privacy = PrivacyBudget(epsilon = 1.0))</code></pre>
+</div>
 <h2 id="Where-to-go-next" class="md-heading">Where to go next<a href="#Where-to-go-next" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
 <ul class="md-list-tight">
-<li><p><a href="./engines/">Engines</a> — what each generator does and when to reach for it</p>
+<li><p><a href="./data/">Preparing your data</a> — column detection, identifiers, missing values</p>
+</li>
+<li><p><a href="./engines/">Engines</a> — how each generator works, and when to reach for it</p>
 </li>
 <li><p><a href="./privacy/">Privacy</a> — budgets, composition, and what is guaranteed</p>
 </li>
@@ -97,6 +117,8 @@ syn    = sample(model, 500)</code></pre>
         <p class="md-toc-title">On this page</p>
           <a class="md-toc-link md-toc-h2" href="#Installation">Installation</a>
           <a class="md-toc-link md-toc-h2" href="#Quick-start">Quick start</a>
+            <a class="md-toc-link md-toc-h3" href="#With-differential-privacy">With differential privacy</a>
+            <a class="md-toc-link md-toc-h3" href="#Choosing-an-engine">Choosing an engine</a>
           <a class="md-toc-link md-toc-h2" href="#Where-to-go-next">Where to go next</a>
       </div>
     </aside>
@@ -107,6 +129,6 @@ syn    = sample(model, 500)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="./siteinfo.js"></script>
   <script src="./../versions.js"></script>
-  <script src="./assets/materialdocs.js?v=c6e93cb4"></script>
+  <script src="./assets/materialdocs.js?v=691d0936"></script>
 </body>
 </html>

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Preparing your data — DataMimic.jl</title>
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=6f671ea8">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="icon" href="../assets/favicon.png">
+  <script>
+    (function(){
+      document.documentElement.classList.add('no-transition');
+      window.addEventListener('load',function(){setTimeout(function(){document.documentElement.classList.remove('no-transition');},50);});
+    })()
+  </script>
+</head>
+<body>
+  <header class="md-navbar">
+    <button id="md-hamburger" class="md-icon-btn md-hamburger" aria-label="Toggle navigation" aria-expanded="false"><svg class="md-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg></button>
+    <img class="md-navbar-logo" src="../assets/logo.png" alt="DataMimic.jl logo" height="32">
+    <span class="md-navbar-title">DataMimic.jl</span>
+    <span class="md-navbar-spacer"></span>
+    <button id="md-search-btn" class="md-search-bar" aria-label="Search documentation" aria-expanded="false">
+      <svg class="md-icon md-search-bar-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <span class="md-search-bar-label">Search docs</span>
+      <kbd class="md-search-bar-kbd">Ctrl K</kbd>
+    </button>
+    <div id="md-version" class="md-version" hidden>
+      <button id="md-version-btn" class="md-version-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Select documentation version">
+        <span id="md-version-current" class="md-version-current"></span>
+        <svg class="md-icon md-version-caret" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M7 10l5 5 5-5z"/></svg>
+      </button>
+      <ul id="md-version-menu" class="md-version-menu" role="listbox" hidden></ul>
+    </div>
+    <a class="md-icon-btn md-repo-link" href="https://github.com/mthelm85/DataMimic.jl" title="View the repository on GitHub" aria-label="View the repository on GitHub" rel="noopener" target="_blank"><svg class="md-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 .3a12 12 0 00-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 0-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.2-.4-.6-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 016 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.2 2.8.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1.1.9 2.2v3.3c0 .3.1.7.8.6A12 12 0 0012 .3z"/></svg><span class="md-repo-label">GitHub</span></a>
+  </header>
+  <div class="md-layout">
+    <nav class="md-sidebar">
+      <a href="../">Home</a>
+      <a href="../data/">Your data</a>
+      <a href="../engines/">Engines</a>
+      <a href="../privacy/">Privacy</a>
+      <a href="../evaluation/">Evaluation</a>
+      <a href="../api/">API</a>
+    </nav>
+    <main class="md-content">
+      <article class="md-article">
+<h1 id="Preparing-your-data" class="md-heading">Preparing your data<a href="#Preparing-your-data" class="md-heading-anchor" aria-label="Link to this section">#</a></h1>
+<p>Most tables need no preparation: pass them to <code class="md-code-inline">fit</code> and the column types are worked out for you. This page covers the cases where that inference needs help, and what happens to identifiers and missing values along the way.</p>
+<h2 id="Column-type-detection" class="md-heading">Column type detection<a href="#Column-type-detection" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>Every column is classified as one of:</p>
+<div class="md-table-wrap">
+<table class="md-table">
+<thead>
+<tr>
+<th style="text-align:right">Kind</th>
+<th style="text-align:right">Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right"><code class="md-code-inline">:continuous</code></td>
+<td style="text-align:right">Real-valued</td>
+</tr>
+<tr>
+<td style="text-align:right"><code class="md-code-inline">:integer</code></td>
+<td style="text-align:right">Whole numbers with enough distinct values to model as numeric</td>
+</tr>
+<tr>
+<td style="text-align:right"><code class="md-code-inline">:categorical</code></td>
+<td style="text-align:right">A modest set of unordered levels</td>
+</tr>
+<tr>
+<td style="text-align:right"><code class="md-code-inline">:binary</code></td>
+<td style="text-align:right">Two levels, or a <code class="md-code-inline">Bool</code> column</td>
+</tr>
+<tr>
+<td style="text-align:right"><code class="md-code-inline">:constant</code></td>
+<td style="text-align:right">A single value throughout</td>
+</tr>
+<tr>
+<td style="text-align:right"><code class="md-code-inline">:identifier</code></td>
+<td style="text-align:right">Effectively unique per row — a key, not a variable</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Detection is cardinality-aware, which matters most for integers. A column of whole numbers holding five distinct values in ten thousand rows is a category that happens to be numbered, and modelling it as continuous would invent values between the levels. The same column with ten thousand distinct values is a genuine numeric variable. Detection draws that line by the ratio of distinct values to rows, not by the element type.</p>
+<p>The classification is reported when it may surprise you — an auto-detected identifier logs an informational message naming the column and the ratio that triggered it.</p>
+<h3 id="Overriding-with-a-hint" class="md-heading">Overriding with a hint<a href="#Overriding-with-a-hint" class="md-heading-anchor" aria-label="Link to this section">#</a></h3>
+<p>When the inference gets it wrong, say so with a <a href="../api/#DataMimic.ColumnHint"><code class="md-code-inline">ColumnHint</code></a>:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">model = fit(CopulaGenerator(), df;
+            hints = [ColumnHint(name = :zip_code, kind = :categorical)])</code></pre>
+</div>
+<p>Postal codes, year columns, and coded survey responses are the usual cases: numeric in storage, categorical in meaning. A hint may also supply the full level set for a categorical column, which is useful when your sample does not happen to contain every level that exists:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">ColumnHint(name = :grade, kind = :categorical, levels = [&quot;A&quot;, &quot;B&quot;, &quot;C&quot;, &quot;D&quot;, &quot;F&quot;])</code></pre>
+</div>
+<p>Observed values not covered by an explicit <code class="md-code-inline">levels</code> list are excluded from the marginal, and you get a warning listing them.</p>
+<h2 id="Identifiers" class="md-heading">Identifiers<a href="#Identifiers" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>An identifier column carries no statistical signal — one value per row, by definition — but it does carry disclosure risk, so DataMimic keeps it out of the model entirely. Real identifier values never reach the synthetic table.</p>
+<p>Because the column is not modelled, it cannot be sampled. <strong>Without a <code class="md-code-inline">fill</code> spec it is dropped from the output.</strong> Give it one to regenerate the column:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">df = DataFrame(
+    ein     = [&quot;12-3456789&quot;, &quot;98-7654321&quot;, &quot;55-1122334&quot;],
+    amount  = [1200.0, 850.0, 2310.0],
+    quarter = [&quot;Q1&quot;, &quot;Q2&quot;, &quot;Q1&quot;],
+)
+
+model = fit(CopulaGenerator(), df;
+            identifiers = [:ein],
+            fill        = Dict(:ein =&gt; :sequential))
+
+syn = sample(model, 100)     # ein = &quot;ein_1&quot;, &quot;ein_2&quot;, …</code></pre>
+</div>
+<p>A fill spec is one of:</p>
+<div class="md-table-wrap">
+<table class="md-table">
+<thead>
+<tr>
+<th style="text-align:right">Spec</th>
+<th style="text-align:right">Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right"><code class="md-code-inline">:sequential</code></td>
+<td style="text-align:right"><code class="md-code-inline">&quot;&lt;colname&gt;_1&quot;</code>, <code class="md-code-inline">&quot;&lt;colname&gt;_2&quot;</code>, …</td>
+</tr>
+<tr>
+<td style="text-align:right"><code class="md-code-inline">:sequential_int</code></td>
+<td style="text-align:right"><code class="md-code-inline">1</code>, <code class="md-code-inline">2</code>, <code class="md-code-inline">3</code>, …</td>
+</tr>
+<tr>
+<td style="text-align:right">a <code class="md-code-inline">String</code> prefix</td>
+<td style="text-align:right"><code class="md-code-inline">&quot;prefix_1&quot;</code>, <code class="md-code-inline">&quot;prefix_2&quot;</code>, …</td>
+</tr>
+<tr>
+<td style="text-align:right">a <code class="md-code-inline">Function</code></td>
+<td style="text-align:right"><code class="md-code-inline">f(i)</code> for row <code class="md-code-inline">i</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The function form covers formats that need to look real:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">fill = Dict(:ein =&gt; i -&gt; string(lpad(10_000_000 + i, 8, &#39;0&#39;)[1:2], &quot;-&quot;,
+                               lpad(10_000_000 + i, 8, &#39;0&#39;)[3:end]))</code></pre>
+</div>
+<p>Identifiers are excluded rather than obfuscated deliberately. Shuffling the characters of a real identifier leaves a value derived from a real record, and the shuffle is often reversible; a freshly generated value is not derived from anyone.</p>
+<h2 id="Missing-values" class="md-heading">Missing values<a href="#Missing-values" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>Missingness is measured per column at fit time and reintroduced at the same rate when sampling, so the synthetic table has a comparable missingness profile rather than a suspiciously complete one.</p>
+<p>The rate is modelled, not the pattern: whether a value is missing is drawn independently per cell, so if missingness in your data is correlated across columns — a block of questions skipped together, say — that structure is not reproduced. A column that is entirely missing is treated as constant.</p>
+<h2 id="Reproducibility" class="md-heading">Reproducibility<a href="#Reproducibility" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<p>Every stochastic entry point takes an <code class="md-code-inline">rng</code>:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">model = fit(CopulaGenerator(), df; rng = MersenneTwister(42))
+syn   = sample(model, 500)                       # uses the model&#39;s rng
+syn2  = sample(model, 500; rng = MersenneTwister(7))   # or pass another</code></pre>
+</div>
+<p>The <code class="md-code-inline">rng</code> given to <code class="md-code-inline">fit</code> is stored on the model, so <code class="md-code-inline">sample</code> is reproducible without repeating yourself. Fitting twice from equal seeds gives identical models.</p>
+<p>Note that this fixes <em>your</em> randomness, not the seed-to-seed variance of the method itself. Two different seeds can produce meaningfully different synthetic tables, particularly at tight privacy budgets — which is why <a href="../api/#DataMimic.Evaluate.compare"><code class="md-code-inline">compare</code></a> repeats each engine over several seeds and reports the spread.</p>
+      </article>
+      <footer class="md-footer">
+        <p>Built with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and <a href="https://github.com/mthelm85/MaterialDocs.jl">MaterialDocs.jl</a></p>
+      </footer>
+    </main>
+    <aside class="md-toc">
+      <div class="md-toc-inner">
+        <p class="md-toc-title">On this page</p>
+          <a class="md-toc-link md-toc-h2" href="#Column-type-detection">Column type detection</a>
+            <a class="md-toc-link md-toc-h3" href="#Overriding-with-a-hint">Overriding with a hint</a>
+          <a class="md-toc-link md-toc-h2" href="#Identifiers">Identifiers</a>
+          <a class="md-toc-link md-toc-h2" href="#Missing-values">Missing values</a>
+          <a class="md-toc-link md-toc-h2" href="#Reproducibility">Reproducibility</a>
+      </div>
+    </aside>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia-repl.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <script src="../siteinfo.js"></script>
+  <script src="../../versions.js"></script>
+  <script src="../assets/materialdocs.js?v=6f671ea8"></script>
+</body>
+</html>
