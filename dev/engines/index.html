@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Engines — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=85053242">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=4dabc770">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -130,8 +130,8 @@ model = fit(gen, df)</code></pre>
 <p>An undertrained diffusion model can score no better than independent sampling. If it places last in a comparison, check the epoch count before concluding anything about the method.</p>
 <p><strong>Divergence.</strong> Training aborts with an explanatory error if the loss stops being finite, rather than burning the remaining epochs on weights that can no longer recover. A lower <code class="md-code-inline">lr</code>, a smaller <code class="md-code-inline">batch_size</code>, or a narrower <code class="md-code-inline">d_layers</code> usually resolves it.</p>
 <p><strong>Privacy.</strong> <code class="md-code-inline">dp = true</code> trains with DP-SGD and requires a budget; see <a href="../privacy/">Privacy</a>.</p>
-<p>DP-SGD trains on the CPU even when a GPU is available, which is deliberate. Per-example gradient clipping makes every backward pass a batch of one, and a GPU&#39;s cost per gradient call is almost entirely launch overhead — around 20 ms whether the batch holds 1 row or 4096. The CPU does the same batch-of-one call several times faster, which came to roughly 10× end to end. Standard training is batched and goes the other way by a wide margin, so it still uses the GPU.</p>
-<p>Expect DP training to be slow regardless: a per-example loop costs on the order of 100× a batched epoch. Budget accordingly, and start with few epochs.</p>
+<p>DP training is slower than ordinary training but no longer dramatically so. Clipping each example&#39;s gradient individually appears to require one backward pass per example; it does not. For a <code class="md-code-inline">Dense</code> layer, example <em>i</em>&#39;s weight gradient is an outer product, so its norm is the product of two column norms — which means every example&#39;s norm, and the clipped sum, come out of two batched passes rather than <em>B</em> unbatched ones. This is <em>ghost clipping</em> (Goodfellow 2015; Li et al. 2021), and it is an exact identity rather than an approximation: DataMimic&#39;s tests assert the two agree to floating-point rounding, both per step and over a full training run.</p>
+<p>Larger batches make DP training <em>cheaper</em> per epoch, as they do for ordinary training — the opposite of the per-example behaviour.</p>
 <p><strong>References.</strong> Kotelnikov et al., <em>TabDDPM</em> (ICML 2023, <a href="https://arxiv.org/abs/2209.15421">arXiv:2209.15421</a>), cross-checked against <a href="https://github.com/yandex-research/tab-ddpm">yandex-research/tab-ddpm</a>; Ho et al., <em>DDPM</em> (NeurIPS 2020); Hoogeboom et al., <em>Multinomial Diffusion</em> (NeurIPS 2021); Nichol &amp; Dhariwal (ICML 2021) for the cosine noise schedule.</p>
 <hr class="md-hr">
 <h2 id="MSTGenerator" class="md-heading">MSTGenerator<a href="#MSTGenerator" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
@@ -197,6 +197,6 @@ model = fit(gen, df)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=85053242"></script>
+  <script src="../assets/materialdocs.js?v=4dabc770"></script>
 </body>
 </html>
