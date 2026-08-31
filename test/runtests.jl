@@ -295,15 +295,6 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
     end
 
     # ════════════════════════════════════════════════════════════════════════
-    # AutoGenerator — non-private
-    # ════════════════════════════════════════════════════════════════════════
-    @testset "AutoGenerator non-private" begin
-        df = make_df()
-        model = fit(AutoGenerator(), df)
-        @test model isa FittedCopulaModel
-    end
-
-    # ════════════════════════════════════════════════════════════════════════
     # Tables.jl round-trip (Phase 1 — Copula)
     # ════════════════════════════════════════════════════════════════════════
     @testset "Tables.jl round-trip" begin
@@ -817,39 +808,6 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
     end
 
     # ════════════════════════════════════════════════════════════════════════
-    # AutoGenerator — private dispatch
-    # ════════════════════════════════════════════════════════════════════════
-    @testset "AutoGenerator private dispatch" begin
-        pb = PrivacyBudget(epsilon = 2.0, delta = 1e-5)
-
-        @testset "small N, categorical-heavy → MSTGenerator" begin
-            # n=50, 3 categorical + 1 numeric: cat_frac = 3/4 > 0.5
-            df = DataFrame(
-                a = rand(["x","y","z"], 50),
-                b = rand(["p","q"], 50),
-                c = rand([true, false], 50),
-                d = randn(50),
-            )
-            model = fit(AutoGenerator(), df;
-                        privacy = pb, rng = MersenneTwister(42))
-            @test model isa FittedMSTModel
-        end
-
-        @testset "small N, continuous-heavy → DPCopulaGenerator" begin
-            # n=50, 3 numeric + 1 categorical: cat_frac = 1/4 ≤ 0.5
-            df = DataFrame(
-                a = randn(50),
-                b = randn(50),
-                c = randn(50),
-                d = rand(["x", "y"], 50),
-            )
-            model = fit(AutoGenerator(), df;
-                        privacy = pb, rng = MersenneTwister(42))
-            @test model isa FittedDPCopulaModel
-        end
-    end
-
-    # ════════════════════════════════════════════════════════════════════════
     # Phase 2 missingness
     # ════════════════════════════════════════════════════════════════════════
     @testset "missingness with private generators" begin
@@ -1187,16 +1145,16 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
     end
 
     # ════════════════════════════════════════════════════════════════════════
-    # AutoGenerator dispatch to DiffusionGenerator
+    # DiffusionGenerator on a wide table
     # ════════════════════════════════════════════════════════════════════════
-    @testset "AutoGenerator → DiffusionGenerator" begin
-        @testset "non-private: D > 30 → Diffusion" begin
-            # Build a table with 35 numeric columns
-            cols_nt = NamedTuple{Tuple(Symbol.("c" .* string.(1:35)))}(
-                Tuple(randn(Float32, 60) for _ in 1:35))
-            model = fit(AutoGenerator(), cols_nt; rng = MersenneTwister(42))
-            @test model isa FittedDiffusionModel
-        end
+    @testset "DiffusionGenerator wide table" begin
+        # 35 numeric columns: more features than the default block width is
+        # tuned for, which is where shape bugs in the denoiser surface.
+        cols_nt = NamedTuple{Tuple(Symbol.("c" .* string.(1:35)))}(
+            Tuple(randn(Float32, 60) for _ in 1:35))
+        model = fit(DiffusionGenerator(epochs = 2), cols_nt;
+                    rng = MersenneTwister(42))
+        @test model isa FittedDiffusionModel
     end
 
     # ════════════════════════════════════════════════════════════════════════

@@ -28,7 +28,7 @@ export AbstractGenerator, AbstractPublicGenerator, AbstractPrivateGenerator
 export AbstractFittedModel
 
 # Generator configs
-export AutoGenerator, CopulaGenerator
+export CopulaGenerator
 export MSTGenerator, DPCopulaGenerator, DiffusionGenerator
 
 # Other types

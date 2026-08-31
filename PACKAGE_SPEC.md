@@ -23,8 +23,8 @@ Version 2.0 intentionally **breaks backward compatibility** with v1.x.
 
 | Phase | Contents | Milestone |
 |-------|----------|-----------|
-| **Phase 1 — Foundation** | Type system (including `PrivacyBudget` struct), Tables.jl plumbing, `CopulaGenerator` (port from v1), identifier handling, column-type detection, `AutoGenerator` (public-only dispatch), serialization | v2.0-alpha |
-| **Phase 2 — Privacy** | `MSTGenerator`, `DPCopulaGenerator`, AutoGenerator private dispatch | v2.0-beta |
+| **Phase 1 — Foundation** | Type system (including `PrivacyBudget` struct), Tables.jl plumbing, `CopulaGenerator` (port from v1), identifier handling, column-type detection, serialization | v2.0-alpha |
+| **Phase 2 — Privacy** | `MSTGenerator`, `DPCopulaGenerator` | v2.0-beta |
 | **Phase 3 — Deep Generative** | `DiffusionGenerator` (Lux extension): TabDDPM with multinomial diffusion for categoricals; non-private mode first, then DP-SGD | v2.0-rc |
 | **Phase 4 — Evaluation** | `DataMimic.Evaluate` submodule (fidelity, DCR, TSTR via EvoTrees.jl) | v2.0 |
 | **Phase 4b — Extended Evaluation & GPU** | Jensen–Shannon divergence, pairwise marginal error, privacy–utility sweep, GPU acceleration for DiffusionGenerator training and sampling | v2.0.1 |
@@ -105,9 +105,6 @@ end
 ### 2.3 Generator Configs
 
 ```julia
-# Auto-selector — dispatches to a concrete generator at fit time.
-struct AutoGenerator <: AbstractGenerator end
-
 # ── Public generators ────────────────────────────────────────────────────
 
 struct CopulaGenerator <: AbstractPublicGenerator
@@ -358,8 +355,7 @@ function DataMimic.fit(
    - `AbstractPrivateGenerator` + `privacy === nothing` → error.
    - `DiffusionGenerator(dp=true)` + `privacy === nothing` → error.
    - `DiffusionGenerator(dp=false)` + `privacy !== nothing` → error.
-6. If `AutoGenerator`, resolve to a concrete generator (§5).
-7. Fit the engine-specific model and return a concrete `AbstractFittedModel`.
+6. Fit the engine-specific model and return a concrete `AbstractFittedModel`.
 
 **Name-conflict note:** `DataMimic.fit` is a new function owned by this
 package — it is *not* `StatsBase.fit`. If a user has both loaded, they
@@ -454,42 +450,34 @@ same Julia version but may fail across versions — document this limitation.
 
 ---
 
-## 5. AutoGenerator Dispatch
+## 5. Engine Selection *(withdrawn)*
 
-`AutoGenerator` inspects `(N, D, column_kinds, privacy)` and selects.
-`D` counts only non-identifier columns.
+This section specified an `AutoGenerator` that inspected `(N, D, column_kinds,
+privacy)` and picked an engine by threshold — `D ≤ 30` to the copula, `N ≥ 20k`
+with `D > 30` to DP-SGD diffusion, and so on. It was built as specified and
+then removed before registration.
 
-| Privacy | Condition | Dispatched To | Rationale |
-|---------|-----------|---------------|-----------|
-| `nothing` | D ≤ 30 | `CopulaGenerator(:beta)` | Fast, deterministic, no neural overhead |
-| `nothing` | D > 30 or N > 100k | `DiffusionGenerator(dp=false)` | Captures deep non-linear structure |
-| `PrivacyBudget` | N < 20k, categorical fraction > 50% | `MSTGenerator(2)` | DP-SGD degrades at small N; marginal histograms preserve utility |
-| `PrivacyBudget` | N < 20k, categorical fraction ≤ 50% | `DPCopulaGenerator()` | Avoids deep-learning noise penalty on small continuous tables |
-| `PrivacyBudget` | N ≥ 20k, D > 30 | `DiffusionGenerator(dp=true)` | Sufficient density for DP-SGD convergence |
-| `PrivacyBudget` | N ≥ 20k, D ≤ 30 | `MSTGenerator(2)` | Ample data but low dimension — PGM is cheaper and competitive |
+The thresholds could not be justified once the engines were measured. Relative
+performance turned out to depend on properties of the data that `(N, D)` does
+not capture, and for the private engines it also moves with ε and with row
+count: MST gains roughly 0.13 in downstream utility going from 2k to 15k rows
+at fixed ε, against the copula's 0.02, so even the row-count axis reorders the
+engines rather than partitioning them. A heuristic that reads only shape was
+therefore giving confident answers it had no basis for, and its confidence was
+the harm — a user who accepted the dispatch never learned that a different
+engine suited their table better.
 
-When the selected engine lives in an unloaded extension (e.g., `DiffusionGenerator`
-without Lux), `fit` throws with a message telling the user which package to load:
+`compare` (§6) replaces it, and answers the same question the other way round:
+fit the candidate engines to the user's actual table, repeat over seeds, and
+report the numbers with their spread. That is a slower answer and a correct
+one, and it exposes the seed variance that a single dispatched fit hides.
+
+Extension loading, previously specified here, still applies. When a generator
+lives in an unloaded extension, `fit` throws naming the package:
 
 ```
 DiffusionGenerator requires Lux.jl. Run `using Lux` before calling fit.
 ```
-
-**Phase-gating:** During Phase 1, only `CopulaGenerator` is available.
-`AutoGenerator` enforces this:
-
-- With a `PrivacyBudget`:
-  ```
-  Private generators are not yet implemented. They arrive in v2.0-beta (Phase 2).
-  ```
-- When dispatch would select `DiffusionGenerator` (the `D > 30` or
-  `N > 100k` non-private path):
-  ```
-  DiffusionGenerator is not yet implemented. Use CopulaGenerator() directly,
-  or wait for v2.0-rc (Phase 3).
-  ```
-  In Phase 1, `AutoGenerator` with no privacy always resolves to
-  `CopulaGenerator(:beta)` regardless of `D` or `N`.
 
 ---
 
@@ -584,7 +572,7 @@ DataMimic/
 │   ├── detect.jl             # column-type detection (carried from v1)
 │   ├── identifiers.jl        # identifier detection, fill specs
 │   ├── privacy.jl            # PrivacyBudget, composition accounting
-│   ├── fit.jl                # fit() dispatch + AutoGenerator routing
+│   ├── fit.jl                # fit() dispatch + validation
 │   ├── sample.jl             # sample() dispatch
 │   ├── serialize.jl          # save / load
 │   ├── engines/
@@ -652,8 +640,6 @@ DataMimic/
 | `AbstractPublicGenerator` + `PrivacyBudget` | `ArgumentError("CopulaGenerator does not support privacy; use a private generator or remove the privacy budget.")` |
 | `AbstractPrivateGenerator` + `privacy === nothing` | `ArgumentError("MSTGenerator requires a PrivacyBudget.")` |
 | Extension engine not loaded | `ErrorException` with `using Lux` instructions |
-| Phase 1 `AutoGenerator` + `PrivacyBudget` | `ErrorException("Private generators are not yet implemented.")` |
-| Phase 1 `AutoGenerator` resolves to `DiffusionGenerator` | `ErrorException("DiffusionGenerator is not yet implemented. Use CopulaGenerator() directly.")` |
 | `sample(model, n)` with `n < 1` | `ArgumentError` |
 | `n > 10 × n_original` | `@warn` (empirical marginals will repeat) |
 | Entirely-missing column | `@warn`, treated as constant(`missing`) |
@@ -671,7 +657,7 @@ DataMimic/
 | `fit(df; scramble=[:id])` | `fit(CopulaGenerator(), df; identifiers=[:id], fill=Dict(:id => :sequential))` |
 | `fit(df)` | `fit(CopulaGenerator(), df)` |
 | `sample(model, n)` | `sample(model, n)` (unchanged) |
-| `synthesize(df, n)` | `synthesize(CopulaGenerator(), df, n)` or `synthesize(AutoGenerator(), df, n)` |
+| `synthesize(df, n)` | `synthesize(CopulaGenerator(), df, n)` |
 | Returns `DataFrame` always | Returns same type as input (DataFrame in, DataFrame out) |
 | `SynthModel` | `FittedCopulaModel` (or other fitted type) |
 | Global RNG | `rng=...` kwarg (global RNG is still the default) |

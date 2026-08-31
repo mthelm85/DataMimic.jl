@@ -33,7 +33,7 @@ df = DataFrame(
     region = rand(["North", "South", "East", "West"], 500),
 )
 
-model = fit(AutoGenerator(), df)
+model = fit(CopulaGenerator(), df)
 syn   = sample(model, 500)
 ```
 

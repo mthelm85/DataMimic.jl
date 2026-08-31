@@ -43,16 +43,11 @@ df = DataFrame(
     active = rand([true, false], 500),
 )
 
-# Let DataMimic pick an engine for you
-model = fit(AutoGenerator(), df)
+model = fit(CopulaGenerator(), df)
 syn   = sample(model, 500)
 
 # Or fit and sample in one call
-syn = synthesize(AutoGenerator(), df, 500)
-
-# Pick an engine explicitly
-model = fit(CopulaGenerator(:gaussian), df)
-syn   = sample(model, 1_000)
+syn = synthesize(CopulaGenerator(), df, 500)
 ```
 
 ### With differential privacy
@@ -102,21 +97,13 @@ A fill spec is one of:
 | `DiffusionGenerator(; dp = false)` | optional | TabDDPM. Highest fidelity; `dp = true` enables DP-SGD |
 | `MSTGenerator(2)` | yes | MST with Private-PGM reconciliation. Good on categorical-heavy data |
 | `DPCopulaGenerator()` | yes | DP histogram marginals + Analyze-Gauss private covariance |
-| `AutoGenerator()` | either | Dispatches to one of the above |
 
-### `AutoGenerator` dispatch
+### Choosing one
 
-Let `D` be the number of modelled columns and `N` the row count.
-
-**Without a privacy budget**
-- `D ≤ 30` → `CopulaGenerator(:beta)`
-- `D > 30` or `N > 100_000` → `DiffusionGenerator(dp = false)`
-
-**With a privacy budget**
-- `N < 20_000`, categorical fraction > 50% → `MSTGenerator(2)`
-- `N < 20_000`, categorical fraction ≤ 50% → `DPCopulaGenerator()`
-- `N ≥ 20_000`, `D > 30` → `DiffusionGenerator(dp = true)`
-- `N ≥ 20_000`, `D ≤ 30` → `MSTGenerator(2)`
+Which engine wins depends on the table, and not in ways that are reliable to
+predict from its shape: engines that rank one way on one dataset routinely
+swap on another. Rather than guess, measure — [`compare`](#comparing-engines)
+fits several engines to *your* data and scores them.
 
 ### Class-conditional diffusion
 

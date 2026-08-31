@@ -28,14 +28,6 @@ end
 # ─── Generator Configs ───────────────────────────────────────────────────────
 
 """
-    AutoGenerator()
-
-Meta-generator that selects a concrete engine at `fit` time based on
-table shape and privacy requirements. See PACKAGE_SPEC §5 for dispatch rules.
-"""
-struct AutoGenerator <: AbstractGenerator end
-
-"""
     CopulaGenerator(copula_type::Symbol=:beta)
 
 Public (non-private) copula-based synthetic data generator.

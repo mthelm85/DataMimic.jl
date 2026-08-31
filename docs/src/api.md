@@ -11,7 +11,6 @@ synthesize
 ## Generators
 
 ```@docs
-AutoGenerator
 CopulaGenerator
 DiffusionGenerator
 MSTGenerator

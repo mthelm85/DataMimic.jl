@@ -6,24 +6,19 @@
 | [`DiffusionGenerator`](@ref) | optional | You want the highest fidelity, and can afford training time |
 | [`MSTGenerator`](@ref) | yes | Private, categorical-heavy data |
 | [`DPCopulaGenerator`](@ref) | yes | Private, continuous-heavy data |
-| [`AutoGenerator`](@ref) | either | You would rather not choose |
 
-## AutoGenerator dispatch
+## Choosing between them
 
-Let `D` be the number of modelled columns (identifiers excluded) and `N` the row
-count.
+The table above says what each engine is *for*, which is enough to narrow the
+field but not to pick a winner. Relative performance depends on the data in
+ways that table shape does not predict — the ordering that holds on one dataset
+frequently reverses on another, and for private engines it also moves with ε
+and with row count.
 
-**Without a privacy budget**
-
-- `D ≤ 30` → `CopulaGenerator(:beta)`
-- `D > 30` or `N > 100_000` → `DiffusionGenerator(dp = false)`
-
-**With a privacy budget**
-
-- `N < 20_000`, categorical fraction > 50% → `MSTGenerator(2)`
-- `N < 20_000`, categorical fraction ≤ 50% → `DPCopulaGenerator()`
-- `N ≥ 20_000`, `D > 30` → `DiffusionGenerator(dp = true)`
-- `N ≥ 20_000`, `D ≤ 30` → `MSTGenerator(2)`
+So measure instead of guessing. [`compare`](@ref) fits a list of engines to
+your own table, repeats each over several seeds, and reports the mean and
+spread of whatever metrics you name. See
+[Comparing engines](evaluation.md#Comparing-engines).
 
 ## CopulaGenerator
 

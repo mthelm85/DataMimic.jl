@@ -8,7 +8,8 @@ Each row carries two independent columns:
 - **MoSCoW** — planning priority, scoped to **Phase 1 (v2.0-alpha)**. *Must*
   means the alpha cannot ship without it; *Won't* means it is explicitly
   deferred to a later phase. This does not change as work lands.
-- **Status** — implementation state today: *Done*, *Partial*, or *Not started*.
+- **Status** — implementation state today: *Done*, *Partial*, *Not started*,
+  or *Removed* for a requirement whose feature was deliberately withdrawn.
 
 These were previously conflated in a single column, so a row reading `Must`
 could mean either "high priority" or "not yet implemented" and there was no way
@@ -49,7 +50,7 @@ verified against the source.
 | **REQ-TYP-004** | Each concrete generator type shall produce its own concrete `AbstractFittedModel` subtype. | Must | Done | 1 |
 | **REQ-TYP-005** | `CopulaGenerator` shall accept a `copula_type::Symbol` parameter (`:beta` or `:gaussian`), defaulting to `:beta`. | Must | Done | 1 |
 | **REQ-TYP-006** | IF `CopulaGenerator` is constructed with a `copula_type` other than `:beta` or `:gaussian`, THEN the constructor shall throw `ArgumentError`. | Must | Done | 1 |
-| **REQ-TYP-007** | `AutoGenerator` shall subtype `AbstractGenerator` and carry no configuration fields. | Must | Done | 1 |
+| **REQ-TYP-007** | `AutoGenerator` shall subtype `AbstractGenerator` and carry no configuration fields. | Must | Removed | 1 |
 | **REQ-TYP-008** | `MSTGenerator` shall subtype `AbstractPrivateGenerator` and accept `max_marginal_order::Int` (default `2`). | Must | Done | 2 |
 | **REQ-TYP-009** | `DPCopulaGenerator` shall subtype `AbstractPrivateGenerator` with no configuration fields. | Must | Done | 2 |
 | **REQ-TYP-010** | `DiffusionGenerator` shall subtype `AbstractGenerator` (not Public or Private) and accept `dp::Bool`, `epochs::Int`, `batch_size::Int`, `hidden_dim::Int`, `n_blocks::Int`, `embed_dim::Int`, `dropout::Float64`, `lr::Float64`, `lr_warmup::Int`. | Must | Done | 3 |
@@ -123,7 +124,7 @@ verified against the source.
 | **REQ-FIT-007** | `fit()` shall return a concrete `AbstractFittedModel` subtype corresponding to the generator used. | Must | Done | 1 |
 | **REQ-FIT-008** | `DataMimic.fit` shall be a new function owned by the package — it shall not extend `StatsBase.fit`. | Must | Done | 1 |
 | **REQ-FIT-009** | IF a `ColumnHint` names a column not present in the table, THEN `fit()` shall throw `ArgumentError`. | Must | Done | 1 |
-| **REQ-FIT-010** | WHEN `AutoGenerator` is passed, `fit()` shall resolve it to a concrete generator before fitting (see §9). | Must | Done | 1 |
+| **REQ-FIT-010** | WHEN `AutoGenerator` is passed, `fit()` shall resolve it to a concrete generator before fitting (see §9). | Must | Removed | 1 |
 | **REQ-FIT-011** | IF all non-identifier columns are removed (all columns are identifiers), THEN `fit()` shall throw `ArgumentError` stating no statistical columns remain. | Must | Done | 1 |
 | **REQ-FIT-012** | WHEN a `ColumnHint` provides `levels` for a `:categorical` column, the marginal shall use those levels and probabilities derived only from matching values. | Could | Done | 1 |
 | **REQ-FIT-013** | IF a `ColumnHint` provides `levels` that do not cover all observed values, THEN `fit()` shall emit `@warn` listing the uncovered values. | Could | Done | 1 |
@@ -156,20 +157,30 @@ verified against the source.
 
 ---
 
-## 9. AutoGenerator Dispatch
+## 9. Engine Selection *(withdrawn)*
+
+`AutoGenerator` was removed before registration. Choosing an engine from table
+shape alone was not defensible: measured rankings depend on the data, and for
+private engines also on ε and row count, in ways `(N, D, column_kinds)` does
+not predict. `compare` — which fits several engines to the user's own
+table over repeated seeds — answers the same question with evidence instead of
+a heuristic, so the heuristic was withdrawn rather than kept alongside it.
+
+Rows below keep their IDs, per the stability rule above; only REQ-AUT-010,
+which governs extension loading rather than dispatch, remains in force.
 
 | ID | Requirement | MoSCoW | Status | Phase |
 |----|-------------|--------|--------|-------|
-| **REQ-AUT-001** | `AutoGenerator` dispatch shall count only non-identifier columns when computing `D`. | Must | Done | 1 |
-| **REQ-AUT-002** | WHEN `privacy === nothing` and `D ≤ 30`, `AutoGenerator` shall resolve to `CopulaGenerator(:beta)`. | Must | Done | 1 |
-| **REQ-AUT-003** | WHEN `privacy === nothing` and (`D > 30` or `N > 100,000`), `AutoGenerator` shall resolve to `DiffusionGenerator(dp=false)`. | Must | Done | 3 |
-| **REQ-AUT-004** | WHEN `privacy !== nothing` and `N < 20,000` and categorical fraction > 50%, `AutoGenerator` shall resolve to `MSTGenerator(2)`. | Must | Done | 2 |
-| **REQ-AUT-005** | WHEN `privacy !== nothing` and `N < 20,000` and categorical fraction ≤ 50%, `AutoGenerator` shall resolve to `DPCopulaGenerator()`. | Must | Done | 2 |
-| **REQ-AUT-006** | WHEN `privacy !== nothing` and `N ≥ 20,000` and `D > 30`, `AutoGenerator` shall resolve to `DiffusionGenerator(dp=true)`. | Must | Done | 3 |
-| **REQ-AUT-007** | WHEN `privacy !== nothing` and `N ≥ 20,000` and `D ≤ 30`, `AutoGenerator` shall resolve to `MSTGenerator(2)`. | Must | Done | 2 |
-| **REQ-AUT-008** | WHILE Phase 1, IF `AutoGenerator` is called with a `PrivacyBudget`, THEN `fit()` shall throw `ErrorException` stating private generators arrive in v2.0-beta. | Must | Done | 1 |
-| **REQ-AUT-009** | WHILE Phase 1, IF `AutoGenerator` resolves to `DiffusionGenerator` (the non-private path), THEN `fit()` shall throw `ErrorException` stating DiffusionGenerator arrives in v2.0-rc and advising to use `CopulaGenerator` directly. | Must | Done | 1 |
-| **REQ-AUT-010** | IF the resolved engine requires an unloaded package extension, THEN `fit()` shall throw `ErrorException` naming the package to load (e.g., `"Run \`using Lux\` before calling fit."`). | Must | Done | 3 |
+| **REQ-AUT-001** | `AutoGenerator` dispatch shall count only non-identifier columns when computing `D`. | Must | Removed | 1 |
+| **REQ-AUT-002** | WHEN `privacy === nothing` and `D ≤ 30`, `AutoGenerator` shall resolve to `CopulaGenerator(:beta)`. | Must | Removed | 1 |
+| **REQ-AUT-003** | WHEN `privacy === nothing` and (`D > 30` or `N > 100,000`), `AutoGenerator` shall resolve to `DiffusionGenerator(dp=false)`. | Must | Removed | 3 |
+| **REQ-AUT-004** | WHEN `privacy !== nothing` and `N < 20,000` and categorical fraction > 50%, `AutoGenerator` shall resolve to `MSTGenerator(2)`. | Must | Removed | 2 |
+| **REQ-AUT-005** | WHEN `privacy !== nothing` and `N < 20,000` and categorical fraction ≤ 50%, `AutoGenerator` shall resolve to `DPCopulaGenerator()`. | Must | Removed | 2 |
+| **REQ-AUT-006** | WHEN `privacy !== nothing` and `N ≥ 20,000` and `D > 30`, `AutoGenerator` shall resolve to `DiffusionGenerator(dp=true)`. | Must | Removed | 3 |
+| **REQ-AUT-007** | WHEN `privacy !== nothing` and `N ≥ 20,000` and `D ≤ 30`, `AutoGenerator` shall resolve to `MSTGenerator(2)`. | Must | Removed | 2 |
+| **REQ-AUT-008** | WHILE Phase 1, IF `AutoGenerator` is called with a `PrivacyBudget`, THEN `fit()` shall throw `ErrorException` stating private generators arrive in v2.0-beta. | Must | Removed | 1 |
+| **REQ-AUT-009** | WHILE Phase 1, IF `AutoGenerator` resolves to `DiffusionGenerator` (the non-private path), THEN `fit()` shall throw `ErrorException` stating DiffusionGenerator arrives in v2.0-rc and advising to use `CopulaGenerator` directly. | Must | Removed | 1 |
+| **REQ-AUT-010** | IF the generator requires an unloaded package extension, THEN `fit()` shall throw `ErrorException` naming the package to load (e.g., `"Run \`using Lux\` before calling fit."`). | Must | Done | 3 |
 
 ---
 
@@ -371,11 +382,17 @@ Issues discovered during requirements extraction from `PACKAGE_SPEC.md`.
 
 ## Summary Counts
 
-| MoSCoW | Count |
-|--------|-------|
-| **Must** | 62 |
-| **Should** | 9 |
-| **Could** | 2 |
-| **Done (previously Won't)** | 38 |
-| **Total** | 111 |
-| **Gaps found** | 14 (11 resolved, 3 open design decisions) |
+Counted from the rows above.
+
+| MoSCoW | Count |     | Status | Count |
+|--------|-------|-----|--------|-------|
+| **Must** | 129 |   | **Done** | 130 |
+| **Should** | 11 |  | **Partial** | 1 |
+| **Could** | 2 |    | **Removed** | 11 |
+| **Total** | 142 |  | **Total** | 142 |
+
+The single *Partial* is REQ-MST-007 (3-way marginals). The 11 *Removed* rows
+are the withdrawn `AutoGenerator` dispatch (§9) plus its type and `fit`
+requirements, REQ-TYP-007 and REQ-FIT-010.
+
+**Gaps found**: 14 (11 resolved, 3 open design decisions).
