@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>API Reference — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=ba0d6399">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=36dec0aa">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -16,11 +16,23 @@
 </head>
 <body>
   <header class="md-navbar">
-    <button id="md-hamburger" class="md-hamburger" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+    <button id="md-hamburger" class="md-icon-btn md-hamburger" aria-label="Toggle navigation" aria-expanded="false"><svg class="md-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg></button>
     <img class="md-navbar-logo" src="../assets/logo.png" alt="DataMimic.jl logo" height="32">
     <span class="md-navbar-title">DataMimic.jl</span>
-    <span style="flex:1"></span>
-    <button id="md-search-btn" class="md-icon-btn" title="Search (Ctrl+K)" aria-label="Search documentation">🔍</button>
+    <span class="md-navbar-spacer"></span>
+    <button id="md-search-btn" class="md-search-bar" aria-label="Search documentation" aria-expanded="false">
+      <svg class="md-icon md-search-bar-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <span class="md-search-bar-label">Search docs</span>
+      <kbd class="md-search-bar-kbd">Ctrl K</kbd>
+    </button>
+    <div id="md-version" class="md-version" hidden>
+      <button id="md-version-btn" class="md-version-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Select documentation version">
+        <span id="md-version-current" class="md-version-current"></span>
+        <svg class="md-icon md-version-caret" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M7 10l5 5 5-5z"/></svg>
+      </button>
+      <ul id="md-version-menu" class="md-version-menu" role="listbox" hidden></ul>
+    </div>
+    <a class="md-icon-btn md-repo-link" href="https://github.com/mthelm85/DataMimic.jl" title="View the repository on GitHub" aria-label="View the repository on GitHub" rel="noopener" target="_blank"><svg class="md-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 .3a12 12 0 00-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 0-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.2-.4-.6-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 016 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.2 2.8.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1.1.9 2.2v3.3c0 .3.1.7.8.6A12 12 0 0012 .3z"/></svg><span class="md-repo-label">GitHub</span></a>
   </header>
   <div class="md-layout">
     <nav class="md-sidebar">
@@ -37,7 +49,7 @@
 <div class="md-docstring" id="DataMimic.fit">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.fit</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/fit.jl#L33-L44" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/fit.jl#L33-L44" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -63,7 +75,7 @@
 <div class="md-docstring" id="DataMimic.sample">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.sample</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/sample.jl#L93-L98" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/sample.jl#L93-L98" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -90,7 +102,7 @@
 <div class="md-docstring" id="DataMimic.synthesize">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.synthesize</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/sample.jl#L290-L294" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/sample.jl#L290-L294" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -104,7 +116,7 @@
 <div class="md-docstring" id="DataMimic.CopulaGenerator">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.CopulaGenerator</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L30-L35" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/types.jl#L30-L35" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -117,7 +129,7 @@
 <div class="md-docstring" id="DataMimic.DiffusionGenerator">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.DiffusionGenerator</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L83-L114" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/types.jl#L83-L114" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -152,7 +164,7 @@
 <div class="md-docstring" id="DataMimic.MSTGenerator">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.MSTGenerator</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L47-L63" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/types.jl#L47-L63" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -167,7 +179,7 @@
 <div class="md-docstring" id="DataMimic.DPCopulaGenerator">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.DPCopulaGenerator</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L75-L80" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/types.jl#L75-L80" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -182,7 +194,7 @@
 <div class="md-docstring" id="DataMimic.FittedCopulaModel">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.FittedCopulaModel</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L199-L204" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/types.jl#L199-L204" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -195,7 +207,7 @@
 <div class="md-docstring" id="DataMimic.FittedMSTModel">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.FittedMSTModel</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L251-L256" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/types.jl#L251-L256" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -208,7 +220,7 @@
 <div class="md-docstring" id="DataMimic.FittedDPCopulaModel">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.FittedDPCopulaModel</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L277-L282" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/types.jl#L277-L282" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -221,7 +233,7 @@
 <div class="md-docstring" id="DataMimic.FittedDiffusionModel">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.FittedDiffusionModel</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L299-L304" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/types.jl#L299-L304" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -235,7 +247,7 @@
 <div class="md-docstring" id="DataMimic.PrivacyBudget">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.PrivacyBudget</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L11-L16" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/types.jl#L11-L16" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -248,7 +260,7 @@
 <div class="md-docstring" id="DataMimic.ColumnHint">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.ColumnHint</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/types.jl#L155-L160" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/types.jl#L155-L160" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -262,7 +274,7 @@
 <div class="md-docstring" id="DataMimic.save">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.save</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/serialize.jl#L10-L18" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/serialize.jl#L10-L18" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -276,7 +288,7 @@
 <div class="md-docstring" id="DataMimic.load">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.load</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/serialize.jl#L27-L33" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/serialize.jl#L27-L33" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -290,7 +302,7 @@
 <div class="md-docstring" id="DataMimic.Evaluate.compare">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.compare</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/compare.jl#L18-L68" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/evaluate/compare.jl#L18-L68" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -338,7 +350,7 @@
 <div class="md-docstring" id="DataMimic.Evaluate.fidelity_score">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.fidelity_score</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/fidelity.jl#L127-L145" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/evaluate/fidelity.jl#L127-L145" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -368,7 +380,7 @@
 <div class="md-docstring" id="DataMimic.Evaluate.utility_tstr">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.utility_tstr</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/tstr.jl#L133-L160" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/evaluate/tstr.jl#L133-L160" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -407,7 +419,7 @@
 <div class="md-docstring" id="DataMimic.Evaluate.privacy_dcr">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.privacy_dcr</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/dcr.jl#L102-L115" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/evaluate/dcr.jl#L102-L115" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -432,7 +444,7 @@
 <div class="md-docstring" id="DataMimic.Evaluate.jensen_shannon">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.jensen_shannon</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/jsd.jl#L78-L93" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/evaluate/jsd.jl#L78-L93" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -458,7 +470,7 @@
 <div class="md-docstring" id="DataMimic.Evaluate.pairwise_marginal_error">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.pairwise_marginal_error</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/marginal_error.jl#L74-L91" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/evaluate/marginal_error.jl#L74-L91" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -486,7 +498,7 @@
 <div class="md-docstring" id="DataMimic.Evaluate.privacy_utility_sweep">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.privacy_utility_sweep</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/e86efaff2ca38f8f9418835e98b4cd6970b653b4/src/evaluate/sweep.jl#L6-L32" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/8d6fc4fce6e0eedbe6e88493d5a662e969ee309d/src/evaluate/sweep.jl#L6-L32" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -533,6 +545,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/julia-repl.min.js"></script>
   <script>hljs.highlightAll();</script>
-  <script src="../assets/materialdocs.js?v=ba0d6399"></script>
+  <script src="../siteinfo.js"></script>
+  <script src="../../versions.js"></script>
+  <script src="../assets/materialdocs.js?v=36dec0aa"></script>
 </body>
 </html>
