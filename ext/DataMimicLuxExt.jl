@@ -1581,7 +1581,28 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
 
     # ── Detect device (GPU if available) ─────────────────────────────
     gdev, cdev = _get_devices()
-    @info "DiffusionGenerator: training on $(gdev)" *
+
+    # DP-SGD trains on the CPU even when a GPU is present, which is not a
+    # typo.  Its per-example gradient clipping makes every backward pass a
+    # batch of one, and a GPU's cost per gradient call is almost entirely
+    # launch overhead: measured at ~20 ms whether the batch is 1 or 4096, and
+    # whether the model has 0.3M parameters or 5M.  The CPU does the same
+    # batch-of-one call in 1.2-15 ms depending on width, so it wins on every
+    # architecture tested.
+    #
+    #   DP-SGD, 4k rows, batch 256   GPU 73.17 s/epoch   CPU 5.87 s/epoch
+    #
+    # Standard training is batched and goes the other way by a wide margin
+    # (0.214 s/epoch on GPU against 4.054 s/epoch on CPU for the paper's
+    # architecture at batch 4096), so only the DP path is redirected.
+    #
+    # If the per-example loop is ever replaced by ghost clipping, the work
+    # becomes batched and this should revert to `gdev`.
+    train_dev = gen.dp ? cdev : gdev
+
+    @info "DiffusionGenerator: training on $(train_dev)" *
+          (gen.dp && train_dev !== gdev ?
+              " (DP-SGD is batch-of-one work; the CPU is ~12x faster here)" : "") *
           (n_classes > 0 ? " (class-conditional on :$(gen.target), $n_classes classes)" : "")
 
     # ── Train ──────────────────────────────────────────────────────────
@@ -1591,14 +1612,14 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
             X_num, X_cat_oh, info.y_indices,
             sched, cat_dims_v, d_num,
             gen.epochs, gen.batch_size, gen.lr, gen.lr_warmup,
-            gen.weight_decay, privacy, rng, gdev)
+            gen.weight_decay, privacy, rng, train_dev)
     else
         ps_bb, ps_emb, st_bb, st_emb = _train_standard!(
             backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
             X_num, X_cat_oh, info.y_indices,
             sched, cat_dims_v, d_num,
             gen.epochs, gen.batch_size, gen.lr, gen.lr_warmup,
-            gen.weight_decay, gen.ema_decay, rng, gdev)
+            gen.weight_decay, gen.ema_decay, rng, train_dev)
     end
 
     # ── Move trained params back to CPU for storage / serialization ──

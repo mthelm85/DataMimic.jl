@@ -138,6 +138,16 @@ usually resolves it.
 **Privacy.** `dp = true` trains with DP-SGD and requires a budget; see
 [Privacy](privacy.md).
 
+DP-SGD trains on the CPU even when a GPU is available, which is deliberate.
+Per-example gradient clipping makes every backward pass a batch of one, and a
+GPU's cost per gradient call is almost entirely launch overhead — around 20 ms
+whether the batch holds 1 row or 4096. The CPU does the same batch-of-one call
+several times faster, which came to roughly 10× end to end. Standard training
+is batched and goes the other way by a wide margin, so it still uses the GPU.
+
+Expect DP training to be slow regardless: a per-example loop costs on the
+order of 100× a batched epoch. Budget accordingly, and start with few epochs.
+
 **References.** Kotelnikov et al., *TabDDPM* (ICML 2023,
 [arXiv:2209.15421](https://arxiv.org/abs/2209.15421)), cross-checked against
 [yandex-research/tab-ddpm](https://github.com/yandex-research/tab-ddpm);
