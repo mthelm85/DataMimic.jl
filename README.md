@@ -4,6 +4,8 @@
 # DataMimic.jl
 
 [![CI](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml)
+[![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
+[![JET](https://img.shields.io/badge/%F0%9F%9B%A9%EF%B8%8F_tested_with-JET.jl-233f9a.svg)](https://github.com/aviatesk/JET.jl)
 
 Synthetic tabular data generation for Julia, with optional differential privacy.
 

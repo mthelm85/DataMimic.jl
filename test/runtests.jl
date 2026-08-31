@@ -1540,3 +1540,6 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
     end
 
 end
+
+# Aqua + JET, backing the quality badges in the README.
+include("quality.jl")
