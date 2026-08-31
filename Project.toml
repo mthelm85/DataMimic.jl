@@ -1,6 +1,6 @@
 name = "DataMimic"
 uuid = "cb7d7795-550a-4968-bbdc-2a75efce1373"
-version = "2.0.0"
+version = "0.1.0"
 authors = ["Matt Helm <mthelm85@gmail.com> and contributors"]
 
 [workspace]

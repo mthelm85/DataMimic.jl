@@ -1,4 +1,4 @@
-# ─── DataMimic v2.0 Benchmark Suite ────────────────────────────────────────
+# ─── DataMimic Benchmark Suite ────────────────────────────────────────
 #
 # Run all engines against standard datasets and report fidelity, privacy,
 # and utility metrics.
@@ -270,7 +270,7 @@ function main()
 
     println()
     println("╔══════════════════════════════════════════════════════════════════╗")
-    println("║           DataMimic v2.0 — Benchmark Suite                      ║")
+    println("║             DataMimic — Benchmark Suite                          ║")
     println("║           $(Dates.now())                                        ║")
     println("╚══════════════════════════════════════════════════════════════════╝")
 

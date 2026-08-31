@@ -11,7 +11,7 @@ struct BoomGenerator <: DataMimic.AbstractGenerator end
 DataMimic._fit_engine(::BoomGenerator, args...) = error("engine exploded")
 DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
 
-@testset "DataMimic.jl v2.0" begin
+@testset "DataMimic.jl" begin
 
     # ── Helpers ──────────────────────────────────────────────────────────────
     function make_df(n = 200)

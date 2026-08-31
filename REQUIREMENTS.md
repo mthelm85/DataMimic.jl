@@ -1,4 +1,9 @@
-# DataMimic.jl v2.0 — Requirements
+# DataMimic.jl — Requirements
+
+> **On the version numbers below.** "v2.0" names the internal rewrite these
+> requirements were written for, not a released version. The package has never
+> been published; its first registered release is **0.1.0**. See the note at
+> the top of `PACKAGE_SPEC.md`.
 
 Derived from `PACKAGE_SPEC.md`. Every requirement uses EARS syntax and
 carries a stable ID that never moves when rows are added or removed.

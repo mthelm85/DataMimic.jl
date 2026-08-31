@@ -1,12 +1,17 @@
-# DataMimic.jl v2.0 — Technical Specification
+# DataMimic.jl — Technical Specification
+
+> **On the version numbers below.** This document was written for an internal
+> rewrite called "v2.0", and that name appears throughout in phase labels and
+> milestones. It refers to the rewrite effort, not to a released version: the
+> package has never been published, and its first registered release is
+> **0.1.0**. The thing that preceded it was an unpublished prototype with no
+> users, so nothing here needs to preserve compatibility with it.
 
 ## 1. Overview
 
-DataMimic.jl v2.0 replaces the single-copula generator with a **multi-engine synthetic
-data toolkit** built on `Tables.jl`. It introduces differential-privacy (DP) mechanisms,
-an automated engine selector, and an evaluation suite.
-
-Version 2.0 intentionally **breaks backward compatibility** with v1.x.
+DataMimic.jl replaces a single-copula prototype with a **multi-engine synthetic
+data toolkit** built on `Tables.jl`. It provides differential-privacy (DP)
+mechanisms and an evaluation suite.
 
 ### Design Principles
 
@@ -23,7 +28,7 @@ Version 2.0 intentionally **breaks backward compatibility** with v1.x.
 
 | Phase | Contents | Milestone |
 |-------|----------|-----------|
-| **Phase 1 — Foundation** | Type system (including `PrivacyBudget` struct), Tables.jl plumbing, `CopulaGenerator` (port from v1), identifier handling, column-type detection, serialization | v2.0-alpha |
+| **Phase 1 — Foundation** | Type system (including `PrivacyBudget` struct), Tables.jl plumbing, `CopulaGenerator` (ported from the prototype), identifier handling, column-type detection, serialization | v2.0-alpha |
 | **Phase 2 — Privacy** | `MSTGenerator`, `DPCopulaGenerator` | v2.0-beta |
 | **Phase 3 — Deep Generative** | `DiffusionGenerator` (Lux extension): TabDDPM with multinomial diffusion for categoricals; non-private mode first, then DP-SGD | v2.0-rc |
 | **Phase 4 — Evaluation** | `DataMimic.Evaluate` submodule (fidelity, DCR, TSTR via EvoTrees.jl) | v2.0 |
@@ -247,7 +252,7 @@ end
 
 ### 3.1 CopulaGenerator (Phase 1)
 
-Port of the v1 engine with two improvements:
+Port of the prototype engine with two improvements:
 - **Gaussian copula option** fitted through `Copulas.jl` on rank-based
   pseudo-observations (maximum likelihood on normal scores by default).  Note
   that both copula types currently filter to complete cases over the numeric
@@ -420,7 +425,7 @@ model = fit(CopulaGenerator(), df;
 sample(model, 100)  # :patient_id = ["SYNTH-000001", "SYNTH-000002", ...]
 ```
 
-**Why not scramble?** v1's `scramble` shuffled characters/digits of real
+**Why not scramble?** The prototype's `scramble` shuffled characters/digits of real
 values, producing output that was neither realistic (garbage strings) nor
 truly private (preserved character frequencies, a side-channel). Excluding
 identifiers from the model and filling with explicit placeholders is both
@@ -569,7 +574,7 @@ DataMimic/
 ├── src/
 │   ├── DataMimic.jl          # module root, exports
 │   ├── types.jl              # §2 type definitions
-│   ├── detect.jl             # column-type detection (carried from v1)
+│   ├── detect.jl             # column-type detection
 │   ├── identifiers.jl        # identifier detection, fill specs
 │   ├── privacy.jl            # PrivacyBudget, composition accounting
 │   ├── fit.jl                # fit() dispatch + validation
@@ -650,22 +655,7 @@ DataMimic/
 
 ---
 
-## 10. Migration from v1.x
-
-| v1.x | v2.0 |
-|------|------|
-| `fit(df; scramble=[:id])` | `fit(CopulaGenerator(), df; identifiers=[:id], fill=Dict(:id => :sequential))` |
-| `fit(df)` | `fit(CopulaGenerator(), df)` |
-| `sample(model, n)` | `sample(model, n)` (unchanged) |
-| `synthesize(df, n)` | `synthesize(CopulaGenerator(), df, n)` |
-| Returns `DataFrame` always | Returns same type as input (DataFrame in, DataFrame out) |
-| `SynthModel` | `FittedCopulaModel` (or other fitted type) |
-| Global RNG | `rng=...` kwarg (global RNG is still the default) |
-| `scramble` (char/digit shuffle) | Removed — use `identifiers` + `fill` instead (§4.3) |
-
----
-
-## 11. References
+## 10. References
 
 Cited by section. Each entry is tagged with the engine or component that
 depends on it so implementers know which papers to read for which phase.
