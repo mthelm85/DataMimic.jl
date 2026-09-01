@@ -1,0 +1,495 @@
+---
+title: "DataMimic.jl — Deep Dive"
+subtitle: "What these methods actually do, built up one piece at a time"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-location: left
+    code-fold: false
+    code-tools: true
+    code-overflow: wrap
+    fig-width: 8
+    fig-height: 4.5
+    fig-align: center
+    df-print: paged
+    theme: cosmo
+    embed-resources: true
+engine: julia
+julia:
+  exeflags: ["--project=."]
+execute:
+  warning: false
+  cache: true
+---
+
+## How to read this
+
+This is not a quickstart. It builds each method up from something small enough
+to see, and the pieces arrive in the order you need them rather than the order
+the API lists them.
+
+Every figure is generated from real data by the code shown above it. Where a
+number appears in the prose it came out of a cell somewhere below — if the two
+ever disagree, trust the cell.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Setup — packages, palette, data loaders"
+using DataMimic
+using DataFrames, Random, Statistics, Printf, LinearAlgebra
+using CairoMakie
+using Lux, Zygote          # activates the DiffusionGenerator extension
+
+include(joinpath(@__DIR__, "..", "benchmark", "datasets.jl"))
+
+CairoMakie.activate!(type = "png", px_per_unit = 2)
+
+# One restrained palette used consistently: real data is blue throughout,
+# synthetic is red, and green marks the thing under discussion.
+const REAL   = "#2E5E8C"
+const SYNTH  = "#C4553B"
+const FOCUS  = "#4F8A6B"
+const MUTED  = "#9AA5B1"
+
+set_theme!(theme_minimal();
+    fontsize = 13,
+    Axis = (; xgridvisible = false, ygridvisible = true,
+              ygridcolor = (:black, 0.06),
+              topspinevisible = false, rightspinevisible = false,
+              leftspinecolor = (:black, 0.25), bottomspinecolor = (:black, 0.25)),
+    Legend = (; framevisible = false))
+
+Random.seed!(1234)
+nothing
+```
+
+# 1. The problem
+
+Start with a table you are not allowed to share.
+
+```{julia}
+adult = load_adult()
+first(adult[:, [:age, :sex, :race, :marital_status, :occupation,
+                :hours_per_week, :income]], 6)
+```
+
+This is the UCI Adult census extract: about 49,000 people, with age, education,
+occupation, marital status, and income. Nothing in it is a name or an address.
+Every direct identifier has already been stripped.
+
+It is still not safe to publish, and the reason is worth seeing rather than
+being told.
+
+### Anonymous does not mean unidentifiable
+
+None of these columns identifies anyone on its own. Plenty of people are 39.
+Plenty are married. But *combinations* narrow very fast, and the question that
+matters is how many people share your exact combination.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "How many people share your exact combination of attributes? Each bar is the share of the 48,842 records that are unique on that many columns."
+# Ordered from coarse to fine, which is what makes the shape visible.
+quasi = [:age, :sex, :marital_status, :occupation, :education,
+         :native_country, :hours_per_week, :race]
+
+function unique_fraction(df, cols)
+    keys_ = collect(zip((df[!, c] for c in cols)...))
+    counts = Dict{Any,Int}()
+    for k in keys_
+        counts[k] = get(counts, k, 0) + 1
+    end
+    count(k -> counts[k] == 1, keys_) / length(keys_)
+end
+
+ks = 1:length(quasi)
+fracs = [unique_fraction(adult, quasi[1:k]) for k in ks]
+
+fig = Figure(size = (860, 380))
+ax = Axis(fig[1, 1];
+    xlabel = "number of attributes known", ylabel = "share of people who are unique",
+    title = "Re-identification by combination",
+    xticks = (ks, string.(ks)))
+barplot!(ax, ks, fracs; color = [f > 0.5 ? SYNTH : REAL for f in fracs], width = 0.65)
+# The step from 6 to 7 attributes is where a fine-grained column enters.
+lines!(ax, [6.5, 6.5], [0, 1.02]; color = FOCUS, linestyle = :dash, linewidth = 1.5)
+text!(ax, 6.55, 0.95; text = "  + hours_per_week", align = (:left, :center),
+      fontsize = 10, color = FOCUS)
+for (k, f) in zip(ks, fracs)
+    text!(ax, k, f + 0.02; text = @sprintf("%.0f%%", 100f),
+          align = (:center, :bottom), fontsize = 10, color = :black)
+end
+ylims!(ax, 0, 1.08)
+hlines!(ax, [0.5]; color = MUTED, linestyle = :dash)
+fig
+```
+
+```{julia}
+#| code-fold: true
+for k in (4, 6, 7, 8)
+    @printf("%d attributes: %5.1f%% of these people are unique in the file\n",
+            k, 100 * fracs[k])
+end
+```
+
+Read the shape rather than any single bar. Four coarse attributes leave almost
+everyone hidden in a crowd. Six still leave three quarters of people
+non-unique. Then `hours_per_week` enters — a column with ninety-six distinct
+values rather than a handful — and the unique share roughly doubles in one
+step.
+
+That is the mechanism worth internalising: **risk is not carried by sensitive
+columns, it is carried by fine-grained ones**. Nobody would call "hours worked
+per week" sensitive. It is the column that does the most damage here, because
+it slices the population thinnest.
+
+Publishing this table publishes those people. An attacker who knows seven
+ordinary facts about someone — facts visible on a social media profile — can
+locate their row for a coin-flip chance and read off whatever else it
+contains.
+
+### So generate new people instead
+
+Synthetic data attacks this differently. Rather than obscuring real records, fit
+a model to the table and draw *new* rows from it. Nobody in the output is
+anybody in particular.
+
+```{julia}
+model = fit(CopulaGenerator(), adult; rng = MersenneTwister(1))
+syn   = sample(model, nrow(adult); rng = MersenneTwister(2))
+first(syn[:, [:age, :sex, :race, :marital_status, :occupation,
+              :hours_per_week, :income]], 6)
+```
+
+Those rows are drawn from an estimated distribution. The 39-year-old in row 1
+of the synthetic table is not the 39-year-old in row 1 of the real one.
+
+Which raises the obvious question, and it is the one this document spends most
+of its length on: **does that actually make it safe, and how would you know?**
+
+The short answer, developed over the next four sections, is that it helps a
+great deal and guarantees nothing — until you add something that does.
+
+# 2. What is a column?
+
+Before any model runs, every column is sorted into a kind, and almost
+everything downstream turns on that decision. It is worth understanding first
+because every engine in this document consumes it.
+
+```{julia}
+DataFrame(column   = Symbol.(names(adult)),
+          kind     = [DataMimic.detect_column_type(adult[!, c]) for c in names(adult)],
+          distinct = [length(unique(skipmissing(adult[!, c]))) for c in names(adult)],
+          eltype   = [string(nonmissingtype(eltype(adult[!, c]))) for c in names(adult)])
+```
+
+Look at `:education_num`. It is stored as an integer, but it takes sixteen
+values and is a coded version of `:education` — a category that happens to be
+numbered. `:age` is also an integer, with seventy-four values, and is a genuine
+numeric variable. Treating those two the same way would be wrong in one
+direction or the other.
+
+### The rule is cardinality, not storage type
+
+The decision is made on how many distinct values a column holds relative to how
+many rows there are — not on whether Julia stored it as an `Int`.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Each numeric column placed by its distinct-value ratio. The ones on the left have few enough levels to be categories."
+numcols = [c for c in names(adult) if nonmissingtype(eltype(adult[!, c])) <: Real]
+ratios = [length(unique(skipmissing(adult[!, c]))) / nrow(adult) for c in numcols]
+kinds  = [DataMimic.detect_column_type(adult[!, c]) for c in numcols]
+
+fig = Figure(size = (860, 320))
+ax = Axis(fig[1, 1]; xscale = log10,
+    xlabel = "distinct values ÷ rows  (log scale)",
+    ylabel = "", title = "Where each numeric column falls",
+    yticks = (1:length(numcols), string.(numcols)),
+    ygridvisible = false)
+scatter!(ax, ratios, 1:length(numcols);
+         color = [k === :categorical ? FOCUS : REAL for k in kinds], markersize = 14)
+for (i, (r, k)) in enumerate(zip(ratios, kinds))
+    text!(ax, r, i; text = "  " * string(k), align = (:left, :center),
+          fontsize = 10, color = MUTED)
+end
+xlims!(ax, minimum(ratios) / 4, maximum(ratios) * 14)
+fig
+```
+
+### Does getting it wrong actually hurt?
+
+This is the kind of claim documentation usually asserts. It is cheap to test:
+take the same table, force two columns to the wrong kind, and see what each
+engine does about it.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+sub2 = adult[1:8000, [:age, :education_num, :hours_per_week, :workclass,
+                      :occupation, :sex, :income]]
+
+function typed_score(gen, hint, priv)
+    hints = hint === nothing ? ColumnHint[] : [hint]
+    m = fit(gen, sub2; hints = hints, privacy = priv, rng = MersenneTwister(3))
+    sy = sample(m, nrow(sub2); rng = MersenneTwister(4))
+    fidelity_score(sub2, sy).aggregate
+end
+
+cases = [("detected correctly",              nothing),
+         ("age forced categorical",          ColumnHint(name = :age, kind = :categorical)),
+         ("education_num forced continuous", ColumnHint(name = :education_num, kind = :continuous))]
+
+DataFrame(
+    typing = first.(cases),
+    copula = [typed_score(CopulaGenerator(), h, nothing) for (_, h) in cases],
+    mst_eps1 = [typed_score(MSTGenerator(), h, PrivacyBudget(epsilon = 1.0))
+                for (_, h) in cases],
+)
+```
+
+The answer is more interesting than a flat "yes". **The copula barely notices**,
+and one of the mis-typings even scores marginally better. **MST degrades by
+something like forty percent.**
+
+That difference is structural, not incidental. The copula models each column
+with its *empirical* distribution, so even a column it has been told to treat
+as continuous is reconstructed by interpolating between values that actually
+occurred — the mistake is absorbed. MST has no such cushion: it discretizes
+everything into contingency tables and then spends a finite privacy budget
+measuring them. Tell it a seventy-four-level numeric column is categorical and
+it now has seventy-four cells to measure with the same noise, most of them
+nearly empty.
+
+So the honest guidance is not "always check your column types". It is: the more
+your engine depends on discretization, and the tighter your privacy budget, the
+more the typing decision costs you. On a public copula fit you can be fairly
+relaxed. On MST at ε = 1 you cannot.
+
+Six kinds exist: `:continuous`, `:integer`, `:categorical`, `:binary`,
+`:constant`, and `:identifier`. The last one is special and gets its own
+treatment later — an identifier carries no statistical signal but plenty of
+disclosure risk, so it is excluded from the model entirely rather than
+synthesised.
+
+# 3. Modelling a table
+
+Now the first real method. The goal: estimate a distribution over rows, well
+enough to draw new ones.
+
+The obstacle is that a table is a *joint* distribution over columns of wildly
+different types — a skewed positive number here, a sixteen-level category
+there — and estimating that jointly is hard. Copulas make it tractable by
+splitting the problem in two.
+
+### Sklar's theorem: shape and dependence are separable
+
+Any joint distribution can be written as its individual marginals, plus a
+function that couples them. Formally, for a joint CDF $F$ with marginals
+$F_1, \dots, F_d$ there is a copula $C$ with
+
+$$
+F(x_1, \dots, x_d) \;=\; C\bigl(F_1(x_1), \dots, F_d(x_d)\bigr),
+$$
+
+and $C$ is unique wherever the marginals are continuous.
+
+That decomposition is exactly what tabular data wants. Each column's shape gets
+modelled *exactly* by its own empirical distribution — no parametric family, no
+fitting error. Only the coupling has to be estimated.
+
+### Step one: strip the shapes away
+
+Push each column through its own empirical CDF. Whatever it looked like, it
+comes out uniform on $[0, 1]$, and only the ranks survive.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Two Wine columns before and after the rank transform. The marginal shapes are gone; the dependence is untouched."
+wine = load_wine(colour = :white)
+
+pit(v) = (sortperm(sortperm(v)) .- 0.5) ./ length(v)
+
+fig = Figure(size = (900, 720))
+
+ax1 = Axis(fig[1, 1]; xlabel = "residual sugar", ylabel = "count",
+           title = "marginal: heavily skewed")
+hist!(ax1, wine.residual_sugar; bins = 60, color = (REAL, 0.75), strokewidth = 0)
+
+ax2 = Axis(fig[1, 2]; xlabel = "F(residual sugar)", ylabel = "count",
+           title = "after the transform: uniform")
+hist!(ax2, pit(wine.residual_sugar); bins = 60, color = (FOCUS, 0.75), strokewidth = 0)
+
+ax3 = Axis(fig[2, 1]; xlabel = "residual sugar", ylabel = "density",
+           title = "joint: shape dominates the picture")
+scatter!(ax3, wine.residual_sugar, wine.density;
+         color = (REAL, 0.18), markersize = 4)
+ylims!(ax3, 0.985, 1.005)
+
+ax4 = Axis(fig[2, 2]; xlabel = "F(residual sugar)", ylabel = "F(density)",
+           title = "joint: pure dependence")
+scatter!(ax4, pit(wine.residual_sugar), pit(wine.density);
+         color = (FOCUS, 0.18), markersize = 4)
+fig
+```
+
+The bottom-right panel is the only thing the copula has to learn. Both axes are
+uniform by construction, so nothing about the marginals remains — the visible
+structure is dependence and nothing else.
+
+### Step two: sample, then put the shapes back
+
+Draw from the fitted copula, then push each coordinate back through the
+corresponding *inverse* CDF. The marginals return exactly right by
+construction, which is why copula output looks so plausible column by column.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Real against synthetic on the same axes. The dependence structure survives the round trip."
+wine_model = fit(CopulaGenerator(), wine; rng = MersenneTwister(5))
+wine_syn   = sample(wine_model, nrow(wine); rng = MersenneTwister(6))
+
+fig = Figure(size = (900, 360))
+for (j, (df, ttl, col)) in enumerate(((wine, "real", REAL),
+                                      (wine_syn, "synthetic", SYNTH)))
+    ax = Axis(fig[1, j]; xlabel = "alcohol", ylabel = j == 1 ? "density" : "",
+              title = ttl)
+    scatter!(ax, df.alcohol, df.density; color = (col, 0.18), markersize = 4)
+    ylims!(ax, 0.985, 1.005); xlims!(ax, 7.5, 15)
+end
+fig
+```
+
+### Does the whole dependence structure survive?
+
+One scatter is anecdote. The honest check is every pair at once.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Spearman correlation across all eleven Wine columns. The third panel is the error, on a five-times tighter colour scale."
+wine_cols = Symbol.(names(wine))
+short(c) = (s = string(c); length(s) <= 9 ? s : s[1:8] * ".")
+labels = short.(wine_cols)
+
+spearman(df) = cor(hcat([pit(Float64.(df[!, c])) for c in wine_cols]...))
+Cr, Cs = spearman(wine), spearman(wine_syn)
+
+function corr_panel(pos, M, ttl, lims; ylabels)
+    ax = Axis(pos; title = ttl, aspect = 1,
+        xticks = (1:length(labels), labels),
+        yticks = (1:length(labels), ylabels ? labels : fill("", length(labels))),
+        xticklabelrotation = π/2, xticklabelsize = 8, yticklabelsize = 8,
+        ygridvisible = false)
+    heatmap!(ax, M; colormap = :RdBu, colorrange = lims)
+end
+
+fig = Figure(size = (1000, 400))
+corr_panel(fig[1, 1], Cr, "real", (-1, 1); ylabels = true)
+corr_panel(fig[1, 2], Cs, "synthetic", (-1, 1); ylabels = false)
+Colorbar(fig[1, 3]; colormap = :RdBu, limits = (-1, 1), width = 9, label = "ρ")
+hm = corr_panel(fig[1, 4], Cs .- Cr, "error (5× tighter scale)", (-0.2, 0.2);
+                ylabels = false)
+Colorbar(fig[1, 5], hm; width = 9, label = "Δρ")
+colgap!(fig.layout, 6)
+fig
+```
+
+```{julia}
+#| code-fold: true
+@printf("largest correlation error: %.3f    mean: %.3f\n",
+        maximum(abs.(Cs .- Cr)), mean(abs.(Cs .- Cr)))
+```
+
+### Categorical columns need one more idea
+
+A copula wants continuous marginals. A category has none — its CDF is a
+staircase, and pushing a level through it gives a single point, not a spread.
+
+The fix is the **distributional transform**: a level occupying the CDF interval
+$[F(k-1), F(k)]$ maps to a uniform draw *inside* that interval. The staircase
+becomes usable, and sampling inverts the same step function.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "A categorical CDF is a staircase (left). The distributional transform spreads each level across its own step (right), which is what makes it usable as a copula coordinate."
+levels_ = sort(unique(skipmissing(adult.education)))
+probs = [count(==(l), skipmissing(adult.education)) for l in levels_]
+probs = probs ./ sum(probs)
+cdf = cumsum(probs)
+
+fig = Figure(size = (960, 380))
+ax1 = Axis(fig[1, 1]; title = "empirical CDF of a 16-level column",
+    xlabel = "level (ordered by index)", ylabel = "F", ygridvisible = true)
+stairs!(ax1, 0:length(levels_), vcat(0.0, cdf); color = REAL, linewidth = 2.5,
+        step = :post)
+for (k, c) in enumerate(cdf)
+    lines!(ax1, [k - 1, k], [c, c]; color = (REAL, 0.35), linewidth = 6)
+end
+
+ax2 = Axis(fig[1, 2]; title = "each level spread across its own step",
+    xlabel = "uniform draw inside [F(k-1), F(k)]", ylabel = "count")
+rng = MersenneTwister(9)
+u = Float64[]
+for (k, l) in enumerate(levels_)
+    lo = k == 1 ? 0.0 : cdf[k-1]
+    n = count(==(l), skipmissing(adult.education))
+    append!(u, lo .+ rand(rng, n) .* (cdf[k] - lo))
+end
+hist!(ax2, u; bins = 80, color = (FOCUS, 0.8), strokewidth = 0)
+vlines!(ax2, cdf[1:end-1]; color = MUTED, linestyle = :dash, linewidth = 0.8)
+fig
+```
+
+The right panel is uniform again — which is exactly what the copula needs.
+Dependence between categorical and numeric columns is therefore modelled rather
+than thrown away.
+
+Two consequences follow, and they explain why there are two copula families.
+
+The association this can express is **monotone in the level ordering**, and for
+a nominal variable that ordering is arbitrary — `occupation` has no natural
+sequence. So it captures a real part of the dependence, not all of it. And a
+Gaussian copula has only a correlation matrix to work with, so it can express
+*only* monotone dependence; the nonparametric Beta copula can represent the
+non-monotone structure an arbitrary ordering produces.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+sub = adult[1:8000, [:age, :education, :occupation, :hours_per_week, :sex, :income]]
+holdout = adult[8001:14000, names(sub)]
+
+function copula_utility(kind)
+    m = fit(CopulaGenerator(kind), sub; rng = MersenneTwister(7))
+    s = sample(m, nrow(sub); rng = MersenneTwister(8))
+    utility_tstr(sub, s, :income; test = holdout, rng = MersenneTwister(10))
+end
+
+b, g = copula_utility(:beta), copula_utility(:gaussian)
+DataFrame(copula = ["beta (default)", "gaussian"],
+          f1_from_synthetic = [b.synth_score, g.synth_score],
+          f1_from_real      = [b.real_score,  g.real_score],
+          ratio             = [b.ratio,       g.ratio])
+```
+
+On a mixed table the difference is large, and it is why `:beta` is the default.
+`:gaussian` is the right choice when you specifically want a Gaussian
+dependence structure — not a faster one.
+
+### What a copula cannot do
+
+- **Dependence is pairwise.** A three-way interaction — a relationship between
+  A and B that reverses depending on C — is not represented.
+- **Nominal ordering is arbitrary**, as above.
+- **A single-level column** cannot be encoded at all, so it is left out of the
+  copula and drawn independently.
+
+Those limits are what the diffusion model in section 8 exists to escape. But
+first, the more urgent question.
