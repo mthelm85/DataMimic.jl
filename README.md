@@ -8,6 +8,7 @@
 
 [![Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://mthelm85.github.io/DataMimic.jl/dev/)
 [![CI](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/mthelm85/DataMimic.jl/actions/workflows/CI.yml)
+[![codecov](https://codecov.io/gh/mthelm85/DataMimic.jl/graph/badge.svg)](https://codecov.io/gh/mthelm85/DataMimic.jl)
 [![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 [![JET](https://img.shields.io/badge/%F0%9F%9B%A9%EF%B8%8F_tested_with-JET.jl-233f9a.svg)](https://github.com/aviatesk/JET.jl)
 
