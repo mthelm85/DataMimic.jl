@@ -43,9 +43,10 @@ Datasets download on first run (about 60 MB, mostly Covertype) and cache under
 Budget around fifteen minutes. Almost all of it is the single
 `DiffusionGenerator` trained in section 8; everything else runs in seconds.
 
-Quarto's `cache` option does **not** currently apply to the Julia engine — no
-cache directory is produced and every render re-runs every cell — so there is
-no way to skip that fit short of editing the epoch count down while drafting.
+Quarto's `cache` option does not help here. A `notebooks/.cache/` directory
+*is* produced, but an unchanged re-render still executes every cell from the
+first — verified by timing one. So there is no way to skip that fit short of
+editing the epoch count down while drafting.
 
 ## Status
 
