@@ -28,13 +28,12 @@ execute:
 
 ## How to read this
 
-This is not a quickstart. It builds each method up from something small enough
-to see, and the pieces arrive in the order you need them rather than the order
-the API lists them.
+Each method here starts from something small enough to see all at once, and
+each one shows up when the method before it runs out of road.
 
-Every figure is generated from real data by the code shown above it. Where a
-number appears in the prose it came out of a cell somewhere below — if the two
-ever disagree, trust the cell.
+Every figure comes from real data, drawn by the code above it. Every number in
+the text was printed by a cell on this page. If the two ever disagree, believe
+the cell.
 
 ```{julia}
 #| code-fold: true
@@ -69,7 +68,7 @@ nothing
 
 # 1. The problem
 
-Start with a table you are not allowed to share.
+Let's start with a table you are not allowed to share.
 
 ```{julia}
 adult = load_adult()
@@ -78,17 +77,19 @@ first(adult[:, [:age, :sex, :race, :marital_status, :occupation,
 ```
 
 This is the UCI Adult census extract: about 49,000 people, with age, education,
-occupation, marital status, and income. Nothing in it is a name or an address.
-Every direct identifier has already been stripped.
+occupation, marital status, and income. No names, no addresses. Every direct
+identifier was stripped out long before it reached us.
 
-It is still not safe to publish, and the reason is worth seeing rather than
-being told.
+And it's still not safe to publish.
 
 ### Anonymous does not mean unidentifiable
 
-None of these columns identifies anyone on its own. Plenty of people are 39.
-Plenty are married. But *combinations* narrow very fast, and the question that
-matters is how many people share your exact combination.
+On its own, each column tells you almost nothing. Plenty of people are 39.
+Plenty are married. Plenty work in sales.
+
+Combinations are another matter. So here's the question: as you learn more and
+more ordinary facts about someone, how fast do they become the only person in
+the file who matches?
 
 ```{julia}
 #| code-fold: true
@@ -137,27 +138,25 @@ for k in (4, 6, 7, 8)
 end
 ```
 
-Read the shape rather than any single bar. Four coarse attributes leave almost
-everyone hidden in a crowd. Six still leave three quarters of people
-non-unique. Then `hours_per_week` enters — a column with ninety-six distinct
-values rather than a handful — and the unique share roughly doubles in one
-step.
+Watch the shape, not any single bar. Four coarse attributes, and almost
+everyone is still hidden in a crowd. Six, and three quarters of people are
+still safe. Then `hours_per_week` joins the list — ninety-six distinct values
+instead of a handful — and the unique share roughly doubles in one step.
 
-That is the mechanism worth internalising: **risk is not carried by sensitive
-columns, it is carried by fine-grained ones**. Nobody would call "hours worked
-per week" sensitive. It is the column that does the most damage here, because
-it slices the population thinnest.
+That jump is the point. Risk doesn't live in the sensitive columns. It lives in
+the fine-grained ones. Nobody would think twice about publishing how many hours
+a week someone works, and it does more damage here than anything else, because
+it cuts the population into thinner slices.
 
-Publishing this table publishes those people. An attacker who knows seven
-ordinary facts about someone — facts visible on a social media profile — can
-locate their row for a coin-flip chance and read off whatever else it
-contains.
+So publishing this table means publishing these people. Someone who knows seven
+ordinary facts about you — the kind on a social media profile — has a coin-flip
+chance of finding your row, and then reads off everything else in it.
 
-### So generate new people instead
+### So invent new people instead
 
-Synthetic data attacks this differently. Rather than obscuring real records, fit
-a model to the table and draw *new* rows from it. Nobody in the output is
-anybody in particular.
+Synthetic data takes a different route. Instead of blurring or suppressing real
+records, you fit a model to the table and draw new rows from it. Nobody in the
+output is anybody in particular, because nobody in the output is anybody.
 
 ```{julia}
 model = fit(CopulaGenerator(), adult; rng = MersenneTwister(1))
@@ -166,20 +165,20 @@ first(syn[:, [:age, :sex, :race, :marital_status, :occupation,
               :hours_per_week, :income]], 6)
 ```
 
-Those rows are drawn from an estimated distribution. The 39-year-old in row 1
-of the synthetic table is not the 39-year-old in row 1 of the real one.
+Those rows came out of an estimated distribution. The 39-year-old in row 1 of
+the synthetic table has nothing to do with the 39-year-old in row 1 of the real
+one.
 
-Which raises the obvious question, and it is the one this document spends most
-of its length on: **does that actually make it safe, and how would you know?**
+Which raises the question the rest of this document keeps returning to. Does
+that make it safe? And how would you know?
 
-The short answer, developed over the next four sections, is that it helps a
-great deal and guarantees nothing — until you add something that does.
+The short answer takes four sections to earn: it helps enormously and
+guarantees nothing, until you add something that does.
 
 # 2. What is a column?
 
-Before any model runs, every column is sorted into a kind, and almost
-everything downstream turns on that decision. It is worth understanding first
-because every engine in this document consumes it.
+Before any model runs, every column is sorted into a kind. Every engine here
+reads that decision, and a lot rides on it.
 
 ```{julia}
 DataFrame(column   = Symbol.(names(adult)),
@@ -188,16 +187,18 @@ DataFrame(column   = Symbol.(names(adult)),
           eltype   = [string(nonmissingtype(eltype(adult[!, c]))) for c in names(adult)])
 ```
 
-Look at `:education_num`. It is stored as an integer, but it takes sixteen
-values and is a coded version of `:education` — a category that happens to be
-numbered. `:age` is also an integer, with seventy-four values, and is a genuine
-numeric variable. Treating those two the same way would be wrong in one
-direction or the other.
+Look at `:education_num`. Julia stores it as an integer, but it takes only
+sixteen values, and it's really `:education` with numbers attached — a category
+in numeric clothing. Now look at `:age`. Also an integer, also whole numbers,
+but seventy-four distinct values, and numeric for real: the distance from 30 to
+40 means something.
+
+Treat those two columns the same way and you'll be wrong about one of them.
 
 ### The rule is cardinality, not storage type
 
-The decision is made on how many distinct values a column holds relative to how
-many rows there are — not on whether Julia stored it as an `Int`.
+So the decision can't come from the storage type. It comes from a ratio: how
+many distinct values does the column hold, against how many rows there are?
 
 ```{julia}
 #| code-fold: true
@@ -225,9 +226,8 @@ fig
 
 ### Does getting it wrong actually hurt?
 
-This is the kind of claim documentation usually asserts. It is cheap to test:
-take the same table, force two columns to the wrong kind, and see what each
-engine does about it.
+Easy enough to find out. Take one table, force two columns to the wrong kind,
+and watch what each engine does about it.
 
 ```{julia}
 #| code-fold: true
@@ -254,34 +254,31 @@ DataFrame(
 )
 ```
 
-The answer is more interesting than a flat "yes". **The copula barely notices**,
-and one of the mis-typings even scores marginally better. **MST degrades by
-something like forty percent.**
+The two engines react very differently. The copula barely notices — one of the
+mis-typings even scores a hair better. MST degrades by something like forty
+percent.
 
-That difference is structural, not incidental. The copula models each column
-with its *empirical* distribution, so even a column it has been told to treat
-as continuous is reconstructed by interpolating between values that actually
-occurred — the mistake is absorbed. MST has no such cushion: it discretizes
-everything into contingency tables and then spends a finite privacy budget
-measuring them. Tell it a seventy-four-level numeric column is categorical and
-it now has seventy-four cells to measure with the same noise, most of them
-nearly empty.
+That split isn't luck. It falls out of how each engine works. The copula models
+every column with its empirical distribution, so a column you wrongly called
+continuous still gets rebuilt from values that actually occurred. The mistake
+is absorbed. MST has no such cushion. It chops everything into contingency
+tables, then spends a fixed privacy budget measuring them. Tell it a
+seventy-four-level numeric column is a category and it has seventy-four cells
+to measure with the same noise, most of them nearly empty.
 
-So the honest guidance is not "always check your column types". It is: the more
-your engine depends on discretization, and the tighter your privacy budget, the
-more the typing decision costs you. On a public copula fit you can be fairly
-relaxed. On MST at ε = 1 you cannot.
+Which sharpens the advice. The more your engine leans on discretization, and
+the tighter your budget, the more a typing mistake costs. On a public copula
+fit you can be relaxed about it. On MST at ε = 1 you can't.
 
 ### When the rule misfires
 
-Six kinds exist: `:continuous`, `:integer`, `:categorical`, `:binary`,
-`:constant`, and `:identifier`. The last is special. An identifier carries no
-statistical signal but plenty of disclosure risk, so it is excluded from the
-model entirely rather than synthesised — and if you give it no `fill` spec, it
-is **dropped from the output**.
+There are six kinds: `:continuous`, `:integer`, `:categorical`, `:binary`,
+`:constant`, and `:identifier`. The last one is treated differently. An
+identifier carries no statistical signal but plenty of disclosure risk, so it
+isn't synthesised at all. It's excluded from the model, and unless you give it
+a `fill` spec, dropped from the output.
 
-That is the right behaviour for a customer number. It is the wrong behaviour
-for this:
+For a customer number, that's right. For this, it's wrong:
 
 ```{julia}
 german = load_german_credit()
@@ -293,10 +290,10 @@ DataFrame(column   = [:credit_amount, :duration_months, :age],
           rows     = fill(nrow(german), 3))
 ```
 
-`credit_amount` is a loan size in Deutschmarks — as continuous a variable as
-anything in the file. But German Credit has only a thousand rows, and 921 of
-the amounts are distinct. By ratio it looks exactly like a key, so it is
-classified as an identifier, excluded from the model, and dropped:
+`credit_amount` is a loan size in Deutschmarks, about as continuous as a
+variable gets. But German Credit has only a thousand rows, and 921 of the loan
+amounts are distinct. By ratio alone, that looks exactly like a primary key. So
+it's classified as an identifier, excluded, and quietly dropped:
 
 ```{julia}
 #| code-fold: true
@@ -306,15 +303,14 @@ s_auto = sample(m_auto, 200; rng = MersenneTwister(12))
 setdiff(names(german), names(s_auto))
 ```
 
-This is the single most consequential way column detection goes wrong, and it
-is worth internalising the shape of it: **the identifier heuristic misfires on
-genuine high-cardinality columns in small datasets**, because "nearly unique"
-and "is a key" look identical from a distinct-value ratio alone. The larger the
-table, the safer the heuristic — a continuous column in fifty thousand rows is
-rarely 92% distinct.
+This is the most consequential way column detection goes wrong: the identifier
+heuristic misfires on real high-cardinality columns in small datasets. From a
+distinct-value ratio alone, "nearly unique" and "is a key" look the same. The
+heuristic gets safer as tables get bigger — a continuous column in fifty
+thousand rows is rarely 92% distinct.
 
-The fix is a hint, and every engine in this document that touches German Credit
-passes one:
+The fix is to tell it. Every engine here that touches German Credit passes a
+hint:
 
 ```{julia}
 credit_hint = [ColumnHint(name = :credit_amount, kind = :continuous)]
@@ -324,24 +320,25 @@ s_hint = sample(m_hint, 200; rng = MersenneTwister(12))
 setdiff(names(german), names(s_hint))
 ```
 
-The lesson generalises past this one column. Detection is a heuristic with a
-silent failure mode, so **check what it decided** — the informational message
-it logs is easy to miss in a long fit, and a dropped column is easy to miss in
-a wide table.
+The lesson isn't about this one column. Detection is a heuristic with a silent
+failure mode, so check what it decided. The message it logs is easy to scroll
+past in a long fit, and a missing column is easy to miss in a wide table.
 
 # 3. Modelling a table
 
-Now the first real method. The goal: estimate a distribution over rows, well
-enough to draw new ones.
+Now the first real method. The goal is easy to state: estimate a distribution
+over rows, well enough to draw new ones from it.
 
-The obstacle is that a table is a *joint* distribution over columns of wildly
+The trouble is that a table is a joint distribution over columns of very
 different types — a skewed positive number here, a sixteen-level category
-there — and estimating that jointly is hard. Copulas make it tractable by
-splitting the problem in two.
+there, a binary flag next to it. Estimating all of that at once is hard.
 
-### Sklar's theorem: shape and dependence are separable
+Copulas get around it by not doing it all at once.
 
-Any joint distribution can be written as its individual marginals, plus a
+### Sklar's theorem: shape and dependence come apart
+
+The whole method rests on one result. Any joint distribution splits into two
+pieces: the marginals — the shape of each column on its own — and a single
 function that couples them. Formally, for a joint CDF $F$ with marginals
 $F_1, \dots, F_d$ there is a copula $C$ with
 
@@ -351,14 +348,16 @@ $$
 
 and $C$ is unique wherever the marginals are continuous.
 
-That decomposition is exactly what tabular data wants. Each column's shape gets
-modelled *exactly* by its own empirical distribution — no parametric family, no
-fitting error. Only the coupling has to be estimated.
+That split does most of the work. The hard part — every column's individual
+shape — stops being a modelling problem: hand each column its own empirical
+distribution and you get it back exactly, with no family to choose and no
+fitting error. All that's left to estimate is the coupling.
 
 ### Step one: strip the shapes away
 
-Push each column through its own empirical CDF. Whatever it looked like, it
-comes out uniform on $[0, 1]$, and only the ranks survive.
+To get at the coupling, push each column through its own empirical CDF.
+Whatever it looked like going in — skewed, bimodal, bounded, spiky — it comes
+out uniform on $[0, 1]$. Only the ranks survive.
 
 ```{julia}
 #| code-fold: true
@@ -391,15 +390,16 @@ scatter!(ax4, pit(wine.residual_sugar), pit(wine.density);
 fig
 ```
 
-The bottom-right panel is the only thing the copula has to learn. Both axes are
-uniform by construction, so nothing about the marginals remains — the visible
-structure is dependence and nothing else.
+The bottom-right panel is the whole remaining problem. Both axes are uniform by
+construction, so nothing about the original shapes is left. Any structure you
+can still see there is dependence and nothing else.
 
-### Step two: sample, then put the shapes back
+### Step two: sample, then put the shapes back on
 
-Draw from the fitted copula, then push each coordinate back through the
-corresponding *inverse* CDF. The marginals return exactly right by
-construction, which is why copula output looks so plausible column by column.
+Sampling is the same trip in reverse. Draw a point from the fitted copula, then
+push each coordinate back through the matching inverse CDF. The marginals come
+back exactly right — by construction, not by approximation — which is why
+copula output looks so plausible column by column.
 
 ```{julia}
 #| code-fold: true
@@ -421,7 +421,7 @@ fig
 
 ### Does the whole dependence structure survive?
 
-One scatter is anecdote. The honest check is every pair at once.
+One scatter plot is an anecdote. Look at every pair of columns at once.
 
 ```{julia}
 #| code-fold: true
@@ -462,12 +462,15 @@ fig
 
 ### Categorical columns need one more idea
 
-A copula wants continuous marginals. A category has none — its CDF is a
-staircase, and pushing a level through it gives a single point, not a spread.
+There's a problem hiding in step one. A copula wants continuous marginals, and
+a category doesn't have one. Its CDF is a staircase, so every "Married" in the
+file lands on the same single point instead of spreading across an interval.
+The uniformity we relied on is gone.
 
-The fix is the **distributional transform**: a level occupying the CDF interval
-$[F(k-1), F(k)]$ maps to a uniform draw *inside* that interval. The staircase
-becomes usable, and sampling inverts the same step function.
+The repair is small. A level occupies the CDF interval $[F(k-1), F(k)]$, so
+rather than mapping it to the top of its step, map it to a uniform draw
+somewhere inside that step. This is the **distributional transform**. Sampling
+inverts the same staircase to get the level back.
 
 ```{julia}
 #| code-fold: true
@@ -501,18 +504,22 @@ vlines!(ax2, cdf[1:end-1]; color = MUTED, linestyle = :dash, linewidth = 0.8)
 fig
 ```
 
-The right panel is uniform again — which is exactly what the copula needs.
-Dependence between categorical and numeric columns is therefore modelled rather
-than thrown away.
+The right panel is uniform again, which is what the copula needed. Dependence
+between a categorical column and a numeric one now gets modelled instead of
+thrown away.
 
-Two consequences follow, and they explain why there are two copula families.
+Two consequences follow, and between them they explain why the package ships
+two copula families.
 
-The association this can express is **monotone in the level ordering**, and for
+First, the association this can express is monotone in the level ordering. For
 a nominal variable that ordering is arbitrary — `occupation` has no natural
-sequence. So it captures a real part of the dependence, not all of it. And a
-Gaussian copula has only a correlation matrix to work with, so it can express
-*only* monotone dependence; the nonparametric Beta copula can represent the
-non-monotone structure an arbitrary ordering produces.
+sequence, we just sorted it somehow. So we capture part of the dependence, not
+all of it.
+
+Second, a Gaussian copula has only a correlation matrix to work with, so
+monotone dependence is all it can express. The nonparametric Beta copula can
+represent the lumpy, non-monotone structure an arbitrary ordering produces,
+which is why it's the default.
 
 ```{julia}
 #| code-fold: true
@@ -533,43 +540,45 @@ DataFrame(copula = ["beta (default)", "gaussian"],
           ratio             = [b.ratio,       g.ratio])
 ```
 
-On a mixed table the difference is large, and it is why `:beta` is the default.
-`:gaussian` is the right choice when you specifically want a Gaussian
-dependence structure — not a faster one.
+On a mixed table the gap is large, which is why `:beta` is the default. Reach
+for `:gaussian` when you want a Gaussian dependence structure specifically —
+not when you want a faster one.
 
 ### What a copula cannot do
+
+Three blind spots.
 
 - **Dependence is pairwise.** A three-way interaction — a relationship between
   A and B that reverses depending on C — is not represented.
 - **Nominal ordering is arbitrary**, as above.
-- **A single-level column** cannot be encoded at all, so it is left out of the
+- **A single-level column** can't be encoded at all, so it's left out of the
   copula and drawn independently.
 
-Those limits are what the diffusion model in section 8 exists to escape. But
-first, the more urgent question.
+These are what the diffusion model in section 8 exists to escape. We'll get
+there. There's a more urgent question first.
 
 # 4. Can I publish this?
 
-Section 3 produced a synthetic table. Every row in it is generated; none is a
-copy of anyone. The natural conclusion is that it is safe to release.
+Section 3 gave us a synthetic table. Every row was generated; not one is a copy
+of a real person. The natural conclusion is that it's safe to release.
 
-Let us try to break that.
+Let's try to break it.
 
 ### The attack
 
-Here is a concrete question an attacker can ask: *was Alice in the training
-data?* They know Alice's attributes — age, occupation, education, hours worked
-— because those are ordinary facts. They have the published synthetic table.
-Nothing else.
+Here's the question an attacker wants answered: *was Alice in the training
+data?* They know Alice's age, occupation, education, hours worked — ordinary
+facts about a person. They have the published synthetic table. That's all they
+get.
 
 The attack is one line of intuition. A model fitted to data containing Alice
-will tend to produce synthetic rows that look slightly more like Alice than a
-model fitted to data without her. So: measure how close Alice's record sits to
-its nearest synthetic neighbour. If that distance is small, guess "member".
+will lean, slightly, toward producing rows that look like Alice. So measure how
+close Alice's record sits to its nearest synthetic neighbour, and if that
+distance is small, guess "member".
 
-To evaluate it we need ground truth, so we fit on half the records and keep the
-other half back. The attacker's score is distance-to-nearest-synthetic-row, and
-we ask how well it separates the two groups.
+To test it we need ground truth, so we fit on half the records and hold the
+other half back. The attacker's only score is distance to the nearest synthetic
+row, and the question is how well it separates the two halves.
 
 ```{julia}
 #| code-fold: true
@@ -641,7 +650,8 @@ DataFrame(rows_fitted = [a.n for a in attacks],
           median_nonmember = [median(a.dn) for a in attacks])
 ```
 
-An AUC of 0.5 means the attack is guessing. Here it is not guessing.
+An AUC of 0.5 would mean the attack is no better than a coin flip. That's not
+what we're looking at.
 
 ```{julia}
 #| code-fold: true
@@ -673,68 +683,74 @@ ylims!(ax2, 0.45, 0.85)
 fig
 ```
 
-Two things stand out, and the second is the uncomfortable one.
+Two things come out of those panels, and the second is the uncomfortable one.
 
-The distributions genuinely separate. Records that were in the training data
-sit measurably closer to the synthetic output than records that were not.
+The distributions separate. Records that were in the training data sit
+measurably closer to the synthetic output than records that were held out.
 
-And **it does not get better with more data.** The intuition that a model
-fitted to forty thousand people cannot possibly memorise any one of them is
-wrong here — the attack works about as well at forty thousand rows as at five
-hundred.
+And it doesn't get better with more data. There's a comforting intuition that a
+model fitted to forty thousand people can't be memorising any one of them —
+too much averaging. The right-hand panel says otherwise. The attack works about
+as well at forty thousand rows as at five hundred.
 
 ### Why the copula leaks
 
-The mechanism is not subtle once you look for it, and it is a direct
-consequence of the design in section 3.
+The mechanism isn't subtle. It falls straight out of the design from section 3.
 
-The copula models each column with its **empirical** distribution. That is what
-made the marginals come back exactly right. But an empirical distribution *is*
-the training values — the set of ages the model can emit is precisely the set
-of ages it saw, and sampling interpolates between observed values rather than
-inventing new ones.
+The copula models each column with its empirical distribution. That's what made
+the marginals come back exactly right. But an empirical distribution *is* the
+training values. The set of ages this model can emit is the set of ages it saw,
+and sampling interpolates between observed values rather than inventing new
+ones.
 
-So the synthetic table is built out of real people's values, recombined.
-Nobody's whole row survives, which is why no record matches exactly. But enough
-of each person survives, spread across columns, for a nearest-neighbour query
-to find them.
+So the synthetic table is built from real people's values, shuffled and
+recombined. Nobody's whole row survives, which is why nothing matches exactly.
+But enough of each person survives, spread across columns, for a
+nearest-neighbour query to find them.
 
-This is worth stating plainly because it generalises past this package: **a
-model that reproduces your data well has, by construction, retained
-information about it.** Fidelity and privacy pull in opposite directions, and
-no amount of care in the modelling escapes that.
+The point reaches well past this package. A model that reproduces your data
+well has, by construction, kept information about it. Fidelity and privacy
+pull against each other, and no amount of care in the modelling gets you out
+of it.
 
 ### What would fix it?
 
-Not a better distance metric, or more rows, or a different copula family. The
-problem is that we have no *bound* on how much any single record can influence
-the output — we only have the observation that it seems to be a lot.
+Not a better distance metric. Not more rows. Not a different copula family.
 
-What we need is a method whose output provably barely depends on whether any
-one person was in the input. That is the next section.
+The missing piece is a bound. Nothing here limits how much one record can
+influence the output. All we have is the observation that it seems to be a lot,
+and an observation is not a guarantee — the next attacker may be cleverer than
+the one we just wrote.
+
+What we want is a method whose output provably barely depends on whether any
+one person was in the input. That's the next section.
 
 # 5. Differential privacy
 
-The guarantee we want, stated before any mathematics: **if I remove you from
-the dataset, the output should look essentially the same.** If that holds, then
-no attacker — however clever, however well-informed — can determine whether you
-were in it, because the output barely depends on the answer.
+Here's the guarantee we want, in plain language: **if I remove you from the
+dataset, the output should look essentially the same.**
+
+If that holds, no attacker can work out whether you were in the data — however
+clever, however well-informed, however many other databases they hold —
+because the output barely depends on the answer. There's nothing to detect.
 
 ### The smallest possible example
 
-Forget tables for a moment. Suppose I want to survey how many people have done
-something they would rather not admit, and I want an honest answer.
+Forget tables for a minute. Say I want to survey how many people have done
+something they'd rather not admit to, and I want an honest answer.
 
-Here is a protocol that gets one. Each respondent flips a coin in private.
+Here's a protocol that gets one. Every respondent flips a coin in private,
+where I can't see it.
 
 - **Heads** — answer truthfully.
 - **Tails** — flip again, and answer "yes" on heads, "no" on tails.
 
-Nobody can be held to their answer. A "yes" might be true, or might be a coin.
-That is *plausible deniability*, and it is built into the mechanism rather than
-promised by the person collecting the data.
+Now nobody can be held to their answer. A "yes" might be true, or it might be a
+coin. That's plausible deniability, and it's built into the mechanism rather
+than promised by the person collecting the data. You don't have to trust me.
+You have to trust the coin.
 
-The remarkable part is that the aggregate survives.
+And the aggregate survives anyway.
 
 ```{julia}
 #| code-fold: true
@@ -777,27 +793,29 @@ ylims!(ax2, 0, 0.6)
 fig
 ```
 
-Someone who reports "yes" is only three times more likely to have meant it than
+Someone who reports "yes" is only three times likelier to have meant it than
 not. That ratio — how much more probable your true answer makes the observed
-one — is the entire idea. Differential privacy is that ratio, bounded and
-named.
+one — is the whole idea. Differential privacy is that ratio, bounded and given
+a name.
 
-### The definition, now that it is obvious
+### The definition, now that it's obvious
 
-A mechanism $M$ is $(\varepsilon, \delta)$-differentially private if for any two
-datasets $D$ and $D'$ differing in a single record, and any set of outputs $S$:
+A mechanism $M$ is $(\varepsilon, \delta)$-differentially private if, for any
+two datasets $D$ and $D'$ differing in a single record, and any set of outputs
+$S$:
 
 $$
 \Pr[M(D) \in S] \;\le\; e^{\varepsilon}\,\Pr[M(D') \in S] \;+\; \delta .
 $$
 
-Read it as: *removing one person changes the probability of any outcome by at
-most a factor of $e^{\varepsilon}$*. The coin-flip protocol above satisfies this
-with $\varepsilon = \ln 3 \approx 1.1$.
+Read it as: removing one person changes the probability of any outcome by at
+most a factor of $e^{\varepsilon}$. The coin-flip protocol satisfies this with
+$\varepsilon = \ln 3 \approx 1.1$ — the three from a moment ago, inside a
+logarithm.
 
-$\delta$ is an escape hatch — a small probability that the bound fails
-outright. It should stay well below $1/n$; at $\delta \approx 1/n$ a mechanism
-is permitted to publish a whole record now and then and still call itself
+The $\delta$ term is an escape hatch: a small probability that the bound just
+fails. It has to stay well below $1/n$. At $\delta \approx 1/n$, a mechanism is
+allowed to publish somebody's whole record now and then and still call itself
 private. DataMimic defaults it to `1e-5`.
 
 ```{julia}
@@ -826,29 +844,32 @@ ylims!(ax, 0, 1)
 fig
 ```
 
-At $\varepsilon = 0.5$ your presence can move any probability by at most about
-65% in relative terms. At $\varepsilon = 3$ it can move it twentyfold, which is
-not much of a promise. This is why the number matters and why quoting it
-without context is meaningless.
+At $\varepsilon = 0.5$, your presence in the data can move any probability by
+at most about 65% in relative terms. At $\varepsilon = 3$ it can move it
+twentyfold, which is barely a promise. So "differentially private" with no
+number attached tells you almost nothing.
 
 ### Three properties that make it usable
 
-**Sensitivity sets the noise.** To release a statistic privately you add noise
-scaled to how much one record could change it. A count changes by at most 1, so
-counts are cheap. A sum of unbounded values could change by anything, so it
-must be clipped first. Every mechanism in this package is an instance of this
-pattern.
+Three facts turn that definition into something you can build a library on.
 
-**Composition is additive, and it is a budget.** Answer two private questions
-and the privacy loss adds up. This is the part practitioners underestimate:
-$\varepsilon$ is not a setting per query, it is a *total* to be divided across
-everything the algorithm does. DataMimic composes under zero-concentrated DP
-(zCDP), which is tighter than naive addition across many mechanisms.
+**Sensitivity sets the noise.** To release a statistic privately, add noise
+scaled to how much one record could change it. A count moves by at most 1 when
+a person comes or goes, so counts are cheap. A sum of unbounded values could
+move by anything, so it has to be clipped first. Every mechanism in this
+package is a version of that pattern.
 
-**Post-processing is free.** Anything computed from a private output is still
-private, with no further cost. This is not a technicality — it is what makes
-synthetic data work at all. Once the model is private, you can draw a thousand
-rows or a million from it without spending anything more, and everything
+**Composition adds up, so ε is a budget.** Ask two private questions and the
+privacy loss accumulates. This is the part that catches people out:
+$\varepsilon$ is not a per-query setting, it's a total, divided across
+everything the algorithm does — every marginal, every covariance, every choice.
+DataMimic composes under zero-concentrated DP (zCDP), which is tighter than
+adding naively across many mechanisms.
+
+**Post-processing is free.** Anything computed from a private output stays
+private, at no further cost. That's not a technicality; it's the reason
+synthetic data works at all. Once the model is private you can draw a thousand
+rows from it, or a million, without spending anything more, and everything
 downstream inherits the guarantee.
 
 ```{julia}
@@ -882,8 +903,8 @@ fig
 
 ### What it costs
 
-Nothing is free. The noise that buys the guarantee also degrades the output,
-and the only way to know by how much on *your* data is to measure it.
+None of this is free. The noise that buys the guarantee also degrades the
+output, and the only way to learn what it costs on your data is to measure it.
 
 ```{julia}
 #| code-fold: true
@@ -914,25 +935,25 @@ axislegend(ax; position = :rt, labelsize = 10)
 fig
 ```
 
-The gap between the curve and the dashed line is the price of the guarantee.
-It shrinks as ε grows, and — importantly for later — it also shrinks as the
-dataset grows, because the noise is fixed by sensitivity while the signal is
-not.
+The gap between the curve and the dashed line is the price of the guarantee. It
+narrows as ε grows, as you'd expect. It also narrows as the dataset grows,
+which is less obvious and matters more: sensitivity fixes the noise regardless
+of how many rows you have, while the signal keeps getting stronger.
 
-With the idea in place, the next three sections are about how each engine
-spends a budget.
+The next three sections are variations on one question — given a budget, how
+should an engine spend it?
 
 # 6. Private copulas
 
-The copula from section 3 has two parts: the marginals and the dependence.
-Making it private means making both private, and each needs a different
-mechanism.
+The copula from section 3 came in two halves: the marginals and the dependence.
+Making it private means making both halves private, and the two halves want
+different mechanisms.
 
 ### Private marginals
 
-A marginal is a histogram — a set of counts. Counts are the friendliest thing
-in differential privacy, because one person changes a count by exactly one.
-Sensitivity is 1, so noise is cheap.
+A marginal is a histogram — a set of counts. Counts are the easiest thing in
+differential privacy: add or remove one person and a count moves by exactly
+one. Sensitivity 1, so the noise is cheap.
 
 ```{julia}
 #| code-fold: true
@@ -958,28 +979,27 @@ end
 fig
 ```
 
-Notice what the noise does and does not damage. The large categories are barely
-affected — adding a few dozen to a count of thirty thousand is nothing. The
-small ones are wrecked, and can even go negative before clamping.
+The noise lands unevenly. Large categories barely feel it — a few dozen either
+way on a count of thirty thousand is nothing. Small ones are wrecked, and some
+go negative before being clamped back to zero.
 
-That is the general shape of differential privacy on real data: **it taxes the
-rare much more heavily than the common**. Which is a reasonable thing for a
-privacy mechanism to do, since rare is exactly what makes someone identifiable
-— but it means minority groups in your data lose the most fidelity, and that is
-worth knowing before you publish.
+That asymmetry is the general shape of differential privacy on real data: it
+taxes the rare far more heavily than the common. Which is fair enough, since
+being rare is what makes a person identifiable. It also means the minority
+groups in your data lose the most fidelity. Know that before you publish.
 
 ### Private dependence: Analyze-Gauss
 
-The dependence half is a covariance matrix, and the mechanism for releasing one
-privately is **Analyze-Gauss** (Dwork, Talwar, Thakurta & Zhang, 2014): clip
-the rows to bound their influence, form the second-moment matrix, and add
-Gaussian noise.
+The other half of the copula is a covariance matrix. The standard way to
+release one privately is **Analyze-Gauss** (Dwork, Talwar, Thakurta & Zhang,
+2014): clip the rows so no single one can dominate, form the second-moment
+matrix, add Gaussian noise.
 
-One detail there is easy to get wrong and silently halves your protection. A
-covariance matrix is symmetric, so the noise added to it must be symmetric
-too — draw the upper triangle and mirror it across the diagonal. Noising both
-triangles independently gives every off-diagonal entry *half* the intended
-variance, and the guarantee you claim no longer holds.
+One detail is easy to get wrong, and getting it wrong silently halves your
+protection. A covariance matrix is symmetric, so the noise has to be symmetric
+too — draw the upper triangle and mirror it across the diagonal. Draw both
+triangles independently and every off-diagonal entry gets half the intended
+variance, at which point the ε you advertise is not the ε you have.
 
 ```{julia}
 #| code-fold: true
@@ -1009,9 +1029,9 @@ Colorbar(fig[1, 4]; colormap = :RdBu, limits = (-1, 1), width = 9, label = "ρ")
 fig
 ```
 
-Put the two halves together and you have `DPCopulaGenerator`: private
-histograms for the marginals, a private covariance for the coupling, and half
-the budget for each.
+Put the two halves back together and you have `DPCopulaGenerator`: private
+histograms for the marginals, a private covariance for the coupling, and the
+budget split evenly between them.
 
 ```{julia}
 #| code-fold: true
@@ -1025,22 +1045,23 @@ DataFrame(engine = ["CopulaGenerator (no guarantee)", "DPCopulaGenerator (ε = 1
                       fidelity_score(wine, dpc_syn).aggregate])
 ```
 
-This is the engine for continuous-heavy data, and Wine is exactly that shape. A
+This is the engine for continuous-heavy data, and Wine is that shape. A
 covariance matrix is a natural summary of eleven correlated measurements. It is
-a poor summary of nine unordered categories — which is what the next section is
+a poor summary of nine unordered categories, which is what the next section is
 for.
 
 # 7. MST: privacy for discrete data
 
 MST won the NIST differential privacy synthetic data challenge. Its central
-idea is a budgeting one: **you cannot afford to measure everything, so spend
-the budget on the relationships that matter most.**
+idea is about budgeting: you can't afford to measure everything, so spend what
+you have on the relationships that matter most.
 
-Consider a table with $d$ columns. There are $d$ one-way marginals and
-$\binom{d}{2}$ two-way ones. Measuring all of them privately splits the budget
-so many ways that each measurement is pure noise. Measuring none of the
-two-way marginals loses every relationship. MST measures a carefully chosen
-few.
+Count the marginals. A table with $d$ columns has $d$ one-way marginals and
+$\binom{d}{2}$ two-way ones. Measure all of them privately and the budget
+splits so many ways that each measurement drowns in noise. Measure none of the
+two-way ones and every relationship in the table is gone.
+
+MST takes the middle road: measure a chosen few.
 
 ### The six steps
 
@@ -1061,7 +1082,7 @@ first(mst_syn[:, [:checking_status, :duration_months, :purpose,
    equal-width bins by default — because the algorithm works over contingency
    tables. This is why column typing mattered so much in section 2.
 2. **Measure every one-way marginal** under Gaussian noise. There are only $d$
-   of them, so they are cheap, and they anchor each column's own distribution.
+   of them, so they're cheap, and they anchor each column's distribution.
 3. **Choose a spanning tree.** Score each candidate pair by how badly the
    independence assumption fails for it, then pick a maximum spanning tree over
    columns using the **exponential mechanism** — which makes the *choice
@@ -1070,24 +1091,26 @@ first(mst_syn[:, [:checking_status, :duration_months, :purpose,
    $d$ columns has exactly $d - 1$ edges, so this is $d - 1$ measurements
    rather than $\binom{d}{2}$.
 5. **Reconcile.** The noisy measurements contradict each other — one marginal's
-   implied column totals will not match another's. Private-PGM fits a single
+   implied column totals won't match another's. Private-PGM fits a single
    tree-structured graphical model that best explains all of them at once.
 6. **Sample** ancestrally down the tree, then map bins back to values.
 
-Step 5 is **post-processing**: it touches only already-private numbers, so it
-costs nothing. That is the property from section 5 doing real work.
+Step 5 touches nothing but already-private numbers, so by the post-processing
+property it costs nothing. That's the third property from section 5 doing real
+work.
 
 ### Why a tree?
 
-This is the choice that makes the whole thing tractable, and it is worth
-seeing why.
+Of all the choices in that list, this is the one that makes the rest tractable.
 
-A general graph of dependencies requires approximate inference — you cannot
-compute the implied joint distribution exactly, so reconciliation becomes an
-approximation on top of noisy data. A **tree** has no cycles, which means
-belief propagation is exact and terminates in two passes. You give up the
-ability to represent some dependency structures, and in exchange every step
-afterwards is exact and cheap.
+Suppose you allowed a general graph of dependencies. Computing the implied
+joint distribution then needs approximate inference, so step 5 becomes an
+approximation stacked on already-noisy measurements and you lose track of which
+errors came from where. A tree has no cycles. Belief propagation on a tree is
+exact and finishes in two passes.
+
+So the trade is: give up some dependency structures, and every step after the
+measurement is exact and cheap.
 
 ```{julia}
 #| code-fold: true
@@ -1142,11 +1165,13 @@ fig
         length(names_), length(edges), binomial(length(names_), 2))
 ```
 
-That ratio is the whole argument. Measuring every pair would divide the budget
-more than four times as many ways, and each measurement would be
-correspondingly noisier.
+That ratio is the argument for the method. Measuring every pair would split the
+same budget more than four times as many ways, and every measurement would come
+back correspondingly noisier.
 
 ### Where MST is strong, and where it is not
+
+Two private engines, two datasets of opposite shape, the same budget each.
 
 ```{julia}
 #| code-fold: true
@@ -1181,34 +1206,40 @@ axislegend(ax; position = :lt, labelsize = 10)
 fig
 ```
 
-This is the clearest engine-selection result in the document, and it is the one
-that actually holds up: on discrete data MST wins, on continuous data the DP
-copula wins, and the margin is large in both directions. Discretizing eleven
-continuous measurements into bins throws away most of what makes them
-informative; summarising nine unordered categories with a covariance matrix
-does the same in the other direction.
+This is the clearest engine-selection result here, and the one that holds up
+under testing. On discrete data MST wins. On continuous data the DP copula
+wins. The margin is large both ways.
+
+The reason is symmetric. Chopping eleven continuous measurements into bins
+throws away most of what made them informative. Summarising nine unordered
+categories with a covariance matrix throws away the same thing from the other
+direction.
 
 # 8. Diffusion
 
-The copula assumes dependence has a particular shape. MST assumes it factors
-along a tree. A diffusion model assumes almost nothing and learns the
-distribution instead — at the cost of far more data and compute.
+Every method so far assumes something about the shape of the dependence. The
+copula assumes it's pairwise. MST assumes it factors along a tree. A diffusion
+model assumes almost nothing and learns the distribution instead, which it pays
+for in data and compute.
 
-The idea is a strange one and worth stating carefully: **destroy the data
-gradually, learn to undo one step of the destruction, then start from pure
-noise and undo your way back to a sample.**
+The idea is strange: destroy the data gradually, learn to undo one step of the
+destruction, then start from pure noise and undo your way back to a sample.
+
+It isn't obvious this should work at all, so take it slowly.
 
 ### The forward process
 
-Add a little Gaussian noise at each of $T$ steps. With
-$\bar\alpha_t = \prod_{s\le t}(1 - \beta_s)$, you can jump straight to any step:
+Destroying the data is the easy half. Add a little Gaussian noise at each of
+$T$ steps. Because Gaussians compose, you never have to walk the steps one at a
+time — writing $\bar\alpha_t = \prod_{s\le t}(1 - \beta_s)$, you can jump
+straight to step $t$:
 
 $$
 q(x_t \mid x_0) = \mathcal{N}\bigl(x_t;\ \sqrt{\bar\alpha_t}\,x_0,\ (1-\bar\alpha_t)\mathbf{I}\bigr).
 $$
 
-So $\bar\alpha_t$ is the whole schedule: how much of the original signal
-survives to step $t$.
+So $\bar\alpha_t$ is the whole schedule: the fraction of the original signal
+still standing at step $t$.
 
 ```{julia}
 #| code-fold: true
@@ -1232,7 +1263,8 @@ end
 fig
 ```
 
-The schedule controls how that dissolution is paced, and the choice matters:
+How fast the signal dissolves is a choice, and the two obvious schedules behave
+very differently:
 
 ```{julia}
 #| code-fold: true
@@ -1254,12 +1286,13 @@ fig
 
 ### Two processes at once
 
-Gaussian noise makes no sense for a categorical column — there is nothing
-between "married" and "divorced" to interpolate through. TabDDPM therefore
-runs a **second diffusion process in parallel, over the same timestep**.
+Now a problem. Gaussian noise makes no sense for a categorical column: there is
+nothing halfway between "married" and "divorced" to drift through. Adding 0.3
+to a marital status means nothing.
 
-Multinomial diffusion interpolates each one-hot vector toward the uniform
-distribution over its levels:
+TabDDPM's answer is a second diffusion process running alongside the first, on
+the same timestep. Instead of drifting toward a Gaussian, each one-hot vector
+melts toward the uniform distribution over its levels:
 
 $$
 q(x_t \mid x_{t-1}) = \mathrm{Cat}\bigl(x_t;\ (1-\beta_t)\,x_{t-1} + \beta_t/K\bigr).
@@ -1283,17 +1316,19 @@ end
 fig
 ```
 
-Carrying this in **log space** is not an optimisation but a necessity:
-probabilities for a 42-level column at $t = 100$ underflow `Float32` otherwise.
+Carrying this in log space isn't an optimisation, it's a requirement.
+Probabilities for a 42-level column at $t = 100$ underflow `Float32` if you
+hold them directly.
 
 ### What the network learns
 
-Training samples a random $t$ per row, noises the row to that step, and asks
-the network to predict the noise that was added. The objective is plain squared
-error for the numeric half and a KL divergence against the true posterior for
-the categorical half.
+The training loop, in one sentence: pick a random $t$ for each row, noise the
+row up to step $t$, and ask the network to name the noise that was added.
+Squared error scores the numeric half; a KL divergence against the true
+posterior scores the categorical half.
 
-Then sampling runs the whole thing backwards, one step at a time.
+Once the network can undo one step, sampling is running the whole thing
+backwards, one step at a time, from pure noise.
 
 ```{julia}
 #| code-fold: true
@@ -1318,13 +1353,13 @@ DataFrame(engine = ["CopulaGenerator", "DiffusionGenerator (150 epochs)"],
           fit_seconds = [NaN, diff_secs])
 ```
 
-**The copula wins, comfortably, and that result should not be read as a verdict
-on diffusion.** One hundred and fifty epochs over twenty thousand rows at batch
-4096 is roughly seven hundred optimizer steps. The configuration in the TabDDPM
-paper uses several thousand, on a network about four times wider. This document
-trains a small model because it has to render in a reasonable time.
+The copula wins comfortably, and that's not a verdict on diffusion. A hundred
+and fifty epochs over twenty thousand rows at batch size 4096 is roughly seven
+hundred optimizer steps. The TabDDPM paper uses several thousand, on a network
+about four times wider. This document trains a small model for one reason: the
+page has to render in a reasonable time.
 
-The failure is visible in the numeric columns, and it has a specific cause:
+How it fails is instructive, though, and it shows up in the numeric columns:
 
 ```{julia}
 #| code-fold: true
@@ -1333,53 +1368,59 @@ DataFrame(column = [:age, :hours_per_week],
           synth_sd = [std(diff_syn.age),  std(diff_syn.hours_per_week)])
 ```
 
-The reverse process divides by $\sqrt{\bar\alpha_t}$, which reaches the order of
-$10^3$ at the noisiest steps of a 100-step cosine schedule. Any error in the
-predicted noise is amplified by that factor, so an imperfectly trained model
-produces numeric columns that are far too spread out. Train it properly and
-this closes; the mechanism is what to understand here, not the number.
+The cause is specific. The reverse process divides by $\sqrt{\bar\alpha_t}$,
+which reaches the order of $10^3$ at the noisiest steps of a 100-step cosine
+schedule. Any error in the predicted noise comes back out multiplied by that,
+so a half-trained model gives you numeric columns that are far too spread out.
+Train it properly and this closes. The mechanism is what to take away, not the
+number.
 
 ### Making it private: ghost clipping
 
-DP-SGD clips **each example's** gradient to a fixed norm before adding noise.
-That per-example clipping is what bounds one person's influence — and it looks
-like it requires a separate backward pass per example, which would be
-catastrophic.
+To put a privacy budget on a neural network you use DP-SGD, which clips each
+example's gradient to a fixed norm before adding noise. That per-example
+clipping is what bounds one person's influence; you can't bound it from the
+averaged gradient, because the averaging has already happened.
 
-It does not. For a dense layer with inputs $a$ and output-gradients $g$,
-example $i$'s weight gradient is an outer product $g_i a_i^\top$, so its norm
-factorises:
+Which looks like it needs a separate backward pass per example. At batch size
+4096, that would be hopeless.
+
+It doesn't. For a dense layer with inputs $a$ and output-gradients $g$, example
+$i$'s weight gradient is an outer product $g_i a_i^\top$, and the norm of an
+outer product factorises:
 
 $$
 \bigl\|\partial L_i/\partial W\bigr\|_F \;=\; \|g_i\|\,\|a_i\| .
 $$
 
-Two column norms. Sum them across layers and you have every example's gradient
-norm — hence its clip factor — without ever forming a per-example gradient. The
-clipped sum is then two more matrix multiplications. Two batched passes replace
-$B$ unbatched ones.
+Two vector norms, both already computed. Sum them across layers and you have
+every example's gradient norm, and so its clip factor, without ever forming a
+per-example gradient. Applying the clipped sum costs two more matrix
+multiplications. Two batched passes replace $B$ unbatched ones.
 
-This is **ghost clipping**, and it is an exact identity rather than an
-approximation. In this package it took DP-SGD from 73.2 to 0.42 seconds per
-epoch on the same configuration, and the test suite asserts the two routes
-agree to floating-point rounding.
+This is **ghost clipping**, and it's an exact identity, not an approximation:
+nothing is traded away for the speed. In this package it took DP-SGD from 73.2
+seconds per epoch to 0.42 on the same configuration, and the test suite pins
+the two routes to agreement within floating-point rounding.
 
 # 9. Evaluation
 
-Three families of metric, measuring three different things, and the interesting
-cases are where they disagree.
+Three families of metric, asking three different questions:
 
 - **Fidelity** — do the distributions match?
-- **Utility** — does a model trained on it work on real data?
+- **Utility** — does a model trained on this work on real data?
 - **Privacy** — how close does it sit to real records?
+
+The interesting cases are the ones where they disagree.
 
 ### Why fidelity alone is not enough
 
-Start with the trap, because it explains the shape of everything else.
+Start with a trap. It explains the shape of everything else.
 
 Here is a deliberately broken generator: take the real table and shuffle every
-column independently. Each column's marginal is now *perfect* — it is the real
-marginal, exactly. Every relationship between columns has been destroyed.
+column independently. Every column's marginal is now perfect — not close to the
+real one, but the real one — and every relationship between columns is
+destroyed.
 
 ```{julia}
 #| code-fold: true
@@ -1406,21 +1447,19 @@ DataFrame(
 )
 ```
 
-Read the first two columns against each other. On **per-column** distance the
-broken generator is essentially perfect — its marginals are not approximations
-of the real ones, they *are* the real ones. A metric that looked only at
-marginals would rank it top.
+Read the first two numeric columns against each other. On per-column distance
+the broken generator is near-perfect, and any evaluation that stopped there
+would have ranked it first.
 
-The **correlation** column is where it falls apart, and that term is what drags
-its aggregate below the copula's despite those flawless marginals. The two
+The correlation term is where it comes apart, and that one term is what drags
+its aggregate below the copula's despite those perfect marginals. Both
 downstream measures agree: five times the pairwise marginal error, and a
-utility ratio of about 0.57 against the copula's 1.0.
+utility ratio around 0.57 against the copula's 1.0.
 
-So the aggregate does catch it — but only because it is not purely marginal.
-That is the design point worth taking away: **any evaluation built solely on
-per-column comparisons can be passed by a generator that has destroyed every
-relationship in your data.** Check a dependence-aware measure, and check
-utility if you can define a task.
+So the aggregate does catch it, but only because it isn't purely marginal. Any
+evaluation built solely on per-column comparisons can be passed by a generator
+that has destroyed every relationship in your data. Check something
+dependence-aware, and check utility too if you can name a task.
 
 ### Fidelity, in detail
 
@@ -1435,10 +1474,10 @@ sort(DataFrame(column = collect(keys(f.column_scores)),
                distance = collect(values(f.column_scores))), :distance, rev = true)
 ```
 
-Every number is a **distance**, so lower is better. Numeric columns use the
-Kolmogorov–Smirnov statistic — the largest vertical gap between the two
-empirical CDFs — and categorical columns use total variation distance. Both are
-bounded in $[0, 1]$, which is what makes them commensurable enough to average.
+Every number here is a distance, so lower is better. Numeric columns are scored
+with the Kolmogorov–Smirnov statistic — the largest vertical gap between the
+two empirical CDFs — and categorical columns with total variation distance.
+Both live in $[0, 1]$, which is what makes averaging them together defensible.
 
 ```{julia}
 #| code-fold: true
@@ -1462,10 +1501,10 @@ axislegend(ax; position = :rb, labelsize = 10)
 fig
 ```
 
-The correlation term compares **Spearman** rather than Pearson correlation,
-deliberately: rank correlation is invariant to the marginal shapes already
-scored by the per-column terms, so the two halves measure different things
-instead of double-counting.
+The correlation term uses Spearman rather than Pearson, deliberately. Rank
+correlation ignores the marginal shapes, which the per-column terms have
+already scored, so the two halves of the aggregate measure different things
+instead of counting the same thing twice.
 
 ### Utility
 
@@ -1476,14 +1515,14 @@ DataFrame(task = [string(u.task)], f1_from_synthetic = [u.synth_score],
           f1_from_real = [u.real_score], ratio = [u.ratio])
 ```
 
-Train on synthetic, test on real. Gradient-boosted trees are fitted twice —
-once on synthetic data, once on real — and both are scored against the same
-held-out real data. The ratio is the number that matters, and it is the most
+Train on synthetic, test on real. Gradient-boosted trees are fitted twice, once
+on synthetic data and once on real, then both are scored against the same
+held-out real data. The ratio is the number that matters, and it's the most
 direct evidence that a synthetic table is fit for anything.
 
-One caution that recurs later: ratios slightly above 1 are common and do not
-mean synthetic data beats real data. Both scores are noisy, and their ratio is
-noisier.
+One caution, which comes up again later: ratios a little above 1 are common and
+don't mean synthetic beats real. Both scores are noisy, and a ratio of two
+noisy things is noisier.
 
 ### Privacy
 
@@ -1511,44 +1550,44 @@ fig
 ```
 
 `exact_matches` should be zero. The second line is the degenerate case for
-comparison: a table scored against itself has every distance zero and every row
-an exact match, which is what a generator that memorised its input would look
+comparison: score a table against itself and every distance is zero, every row
+an exact match. That's what a generator that memorised its input would look
 like.
 
-Treat DCR as a smoke test, not a guarantee. Section 4 already showed the
-limitation concretely — the copula there had no exact matches at all and still
-leaked membership at AUC 0.72. **A good DCR does not substitute for a privacy
-budget.**
+Treat DCR as a smoke alarm, not a guarantee. Section 4 showed the limit
+concretely — that copula had no exact matches at all and still leaked
+membership at AUC 0.72. A clean DCR is no substitute for a privacy budget.
 
 # 10. How these break
 
-Documentation usually stops at the happy path. These are the failure modes that
-actually occur, all of them found by running the code rather than reading it.
+Everything below is a failure mode that actually happens. Each one was found by
+running the code, not by reading it.
 
 ### An undertrained diffusion model over-disperses
 
-Section 8 showed this. The mechanism is worth restating because the symptom is
-distinctive: the reverse process divides by $\sqrt{\bar\alpha_t}$, of order
-$10^3$ at the noisiest steps, so any error in the predicted noise is amplified
+We met this in section 8. The symptom is distinctive, so here it is again: the
+reverse process divides by $\sqrt{\bar\alpha_t}$, of order $10^3$ at the
+noisiest steps, so any error in the predicted noise comes back out multiplied
 by the same factor. Numeric columns come out far too wide.
 
 If your synthetic numeric columns have two or three times the standard
-deviation of the real ones, the model is undertrained. It is not a
-hyperparameter to tune away; it is a signal to train longer.
+deviation of the real ones, the model is undertrained. It isn't a
+hyperparameter to tune away. It's telling you to train longer.
 
 ### Rejection sampling is not distribution-preserving
 
-When the reverse process overflows, the offending rows are discarded and
-redrawn. That sounds harmless. It is not.
+When the reverse process overflows, the offending rows are thrown away and
+redrawn. That sounds harmless. It isn't.
 
-Keeping only the rows that come back finite samples from the distribution
-*conditioned on finiteness* — and divergence is not independent of the data.
-For a class-conditional model it correlates with the **label**, because the
-label is an input to the denoiser. On an undertrained Adult model this turned a
-76/24 income split into 100% a single class, in a table that otherwise looked
-entirely well-formed.
+Keep only the rows that come back finite and you're no longer sampling from
+your distribution — you're sampling from it conditioned on finiteness. And
+whether a row diverges is not independent of what's in it. For a
+class-conditional model it correlates with the label, because the label is one
+of the denoiser's inputs. On an undertrained Adult model this turned a 76/24
+income split into 100% a single class, in a table that showed no other sign of
+trouble.
 
-DataMimic now tracks the discard rate and refuses rather than returning a
+So DataMimic tracks the discard rate and refuses rather than handing back a
 biased sample:
 
 ```{julia}
@@ -1573,9 +1612,9 @@ println("real split: ",
                 for l in sort(unique(tiny.income))]; digits = 3))
 ```
 
-Whether that cell samples or refuses depends on how badly this particular tiny
-model diverges. Either outcome is the point: you get a usable sample or an
-error, never a quietly skewed table.
+Whether that cell sampled or refused depends on how badly this particular tiny
+model diverged. Either way the point holds: you get a usable sample or you get
+an error. You never get a skewed table that looks fine.
 
 ### Seed variance can exceed the difference you are measuring
 
@@ -1616,37 +1655,35 @@ fig
         abs(results.MST[1] - results.DPCopula[1]))
 ```
 
-The absolute spread is larger at the tighter budget, which is the expected
-direction — more noise is being injected. But the number to hold onto is the
-last line: **one standard deviation of seed-to-seed variation is a substantial
-fraction of the engine-to-engine differences you are usually trying to
-detect.**
+The spread is wider at the tighter budget, as you'd expect — more noise is
+going in. But the number to hold onto is the last line. One standard deviation
+of seed-to-seed variation is a large fraction of the engine-to-engine
+differences you are usually trying to detect.
 
-That is why `compare` repeats every engine over several seeds and warns below
-three. A single-seed comparison of two private engines is measuring noise as
-much as method.
+That's why `compare` repeats every engine across several seeds and warns you
+below three. Compare two private engines on one seed each and you're measuring
+noise as much as method.
 
 ### Numerical failures hide in log space
 
-The categorical machinery works in log space, and log-space code fails in ways
-that produce `NaN` rather than an obviously wrong number.
+The categorical machinery runs in log space, and log-space code has an
+unpleasant habit: when it fails it doesn't give you a slightly wrong number, it
+gives you `NaN`.
 
-One real example from this package: the per-block log-softmax subtracted a
-single **global** maximum before exponentiating. With raw network logits
-spanning roughly ±100, a block sitting far below the global maximum underflowed
-to zero across all its rows — so the block sum was 0, `log(0)` was `-Inf`, and
-the whole loss became `NaN`. It required both several categorical columns and a
-wide batch to appear, which is why it survived a long time. The fix was a
-per-block maximum.
+A real one from this package. The per-block log-softmax subtracted a single
+global maximum before exponentiating. With raw network logits spanning roughly
+±100, a block sitting far below that maximum underflowed to zero across all its
+rows. The block sum was 0, `log(0)` was `-Inf`, and the whole loss became
+`NaN`. Reproducing it needed several categorical columns and a wide batch at
+once, which is why it survived so long. The fix was a per-block maximum.
 
-The general lesson: **a numerical bug in log space is invisible until it is
-catastrophic.** If training produces `NaN`, suspect an underflow before
-suspecting the learning rate.
+The lesson: a numerical bug in log space is invisible until it's catastrophic.
+If training produces `NaN`, suspect an underflow before the learning rate.
 
 # 11. Choosing an engine, measured
 
-Everything above describes what each engine is *for*. This section tests
-whether that description predicts anything.
+Everything above describes what each engine is for. The harder question is
+whether any of that predicts what happens when you run them.
 
 ```{julia}
 #| code-fold: true
@@ -1703,48 +1740,47 @@ fig
 ### What this actually shows
 
 **The public copula wins on fidelity everywhere, and that is not a finding
-about algorithm quality.** `CopulaGenerator` is not solving the same problem as
-`MSTGenerator` — it offers no privacy guarantee at all. Comparing them on
-fidelity measures the *price of privacy*, which is the honest way to read that
-chart. The gap is what a formal guarantee costs on your data.
+about algorithm quality.** `CopulaGenerator` isn't solving the same problem as
+`MSTGenerator`; it offers no privacy guarantee at all. Comparing them on
+fidelity measures the price of privacy. Read the chart that way and the gap
+becomes informative: it's what a formal guarantee costs on your data.
 
-**Among engines that solve the same problem, shape predicts the winner.**
-Section 7 made this comparison properly: at the same ε, MST wins on the
-categorical dataset and the DP copula wins on the continuous one, in both
-directions by a clear margin. That is the one selection rule in this document
-that survived testing.
+**Among engines solving the same problem, shape predicts the winner.** Section
+7 ran that comparison properly. At the same ε, MST wins on the categorical
+dataset and the DP copula wins on the continuous one, both by a clear margin.
+It's the one selection rule here that survived testing.
 
 **The `:beta` / `:gaussian` split flips with the data.** Beta wins on the
-categorical-heavy tables, where an arbitrary level ordering produces
-non-monotone structure only a nonparametric copula can represent. Gaussian is
-competitive on all-continuous Wine, where a single correlation matrix is close
-to the right model.
+categorical-heavy tables, where an arbitrary level ordering creates
+non-monotone structure only a nonparametric copula can represent. Gaussian
+holds its own on all-continuous Wine, where a single correlation matrix is
+close to the right model.
 
-**The error bars are not decoration.** Where they overlap, the difference in
-means is not evidence of anything — and a single-seed run would have reported a
-confident winner regardless.
+**The error bars are not decoration.** Where they overlap, a difference in
+means is evidence of nothing — and a single-seed run would have reported a
+confident winner anyway.
 
 ### Practical guidance
 
 **Start with `CopulaGenerator()`.** Seconds to fit, strong on mixed types, and
-it gives you the baseline everything else has to beat. If it is good enough,
-you are done.
+it gives you the baseline everything else has to beat. If it's good enough,
+you're done.
 
-**Decide whether you need a guarantee before you start.** Privacy cannot be
-retrofitted — a non-private model has already seen the data, and no amount of
-post-hoc checking changes that. Section 4 is the argument for deciding this
-deliberately rather than by inspection.
+**Decide whether you need a guarantee before you start.** Privacy can't be
+retrofitted: a non-private model has already seen the data, and no amount of
+checking afterwards undoes that. Section 4 is the argument for deciding this
+deliberately rather than by eye.
 
-**Match the private engine to the data shape.** Discrete → MST. Continuous →
-DP copula. This is the one shape-based rule the measurements support.
+**Match the private engine to the shape of the data.** Discrete → MST.
+Continuous → DP copula. The one shape-based rule the measurements support.
 
 **Give every engine a fair configuration.** A diffusion model at a small epoch
 count measures your patience, not the method.
 
 **Use at least three seeds**, and read the spread before the mean.
 
-**Check what column detection decided.** It is a heuristic with a silent
-failure mode, and a dropped column is easy to miss.
+**Check what column detection decided.** It's a heuristic with a silent failure
+mode, and a dropped column is easy to miss.
 
 ## References
 
