@@ -1158,6 +1158,39 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
     end
 
     # ════════════════════════════════════════════════════════════════════════
+    # Hinting an integer column as continuous
+    # ════════════════════════════════════════════════════════════════════════
+    #
+    # `_cast_numeric` converted sampled values back to the column's original
+    # eltype. For a column stored as Int64 but hinted :continuous, that meant
+    # convert(Vector{Int64}, [13.28, ...]) and an InexactError. The hint is the
+    # caller explicitly asking for continuous modelling, so continuous values
+    # are what should come back.
+    @testset "integer column hinted continuous" begin
+        df = DataFrame(a = rand(MersenneTwister(1), 1:16, 500),
+                       b = randn(MersenneTwister(2), 500))
+
+        m = fit(CopulaGenerator(), df;
+                hints = [ColumnHint(name = :a, kind = :continuous)],
+                rng = MersenneTwister(3))
+        s = sample(m, 200; rng = MersenneTwister(4))
+
+        @test eltype(s.a) <: AbstractFloat
+        @test all(isfinite, s.a)
+        # Continuous means continuous: at least some draws are not whole.
+        @test any(v -> abs(v - round(v)) > 1e-9, s.a)
+
+        # The other kinds still round-trip to integers.
+        for kind in (:integer, :categorical)
+            mk = fit(CopulaGenerator(), df;
+                     hints = [ColumnHint(name = :a, kind = kind)],
+                     rng = MersenneTwister(3))
+            sk = sample(mk, 200; rng = MersenneTwister(4))
+            @test eltype(sk.a) <: Integer
+        end
+    end
+
+    # ════════════════════════════════════════════════════════════════════════
     # Learning-rate annealing
     # ════════════════════════════════════════════════════════════════════════
     #

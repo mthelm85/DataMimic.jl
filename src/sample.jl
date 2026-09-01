@@ -22,6 +22,14 @@ function _cast_numeric(vals::Vector{Float64}, col_kind::Symbol, T::Type)
         rounded = round.(Int64, vals)
         return T <: Integer ? convert(Vector{T}, rounded) :
                               convert(Vector{T}, Float64.(rounded))
+    elseif T <: Integer
+        # Stored as integers, but being modelled as continuous — which only
+        # happens when the caller asked for it, since detection would have
+        # said :integer or :categorical. Honour the request: continuous draws
+        # are not whole numbers, and forcing them back into the original
+        # integer type throws InexactError rather than producing anything
+        # useful. The output column comes back as Float64.
+        return vals
     else
         return convert(Vector{T}, vals)
     end
