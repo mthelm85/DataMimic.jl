@@ -5,3 +5,4 @@ docs/build/
 notebooks/*_files/
 notebooks/*.html
 notebooks/.jupyter_cache/
+notebooks/.cache/
