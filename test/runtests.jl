@@ -1158,6 +1158,50 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
     end
 
     # ════════════════════════════════════════════════════════════════════════
+    # Identifier detection needs enough observations to mean anything
+    # ════════════════════════════════════════════════════════════════════════
+    #
+    # The heuristic divided unique values by NON-MISSING values with no floor,
+    # so a column with a single observation scored a ratio of 1.0 and was
+    # classified as an identifier - then silently dropped from the output.
+    # Found by an OpenML sweep on the `anneal` dataset, whose :bc column has
+    # 898 rows and exactly one non-missing value.
+    @testset "identifier detection needs observations" begin
+        n = 400
+        rng = MersenneTwister(1)
+
+        # One observation in a sea of missing: a constant, not a key.
+        sparse_col = Vector{Union{Missing,String}}(missing, n)
+        sparse_col[7] = "Y"
+
+        # A handful of distinct observations is still not a key.
+        few_col = Vector{Union{Missing,String}}(missing, n)
+        for (i, v) in enumerate(["a", "b", "c", "d", "e"])
+            few_col[i * 10] = v
+        end
+
+        df = DataFrame(num = randn(rng, n),
+                       cat = rand(rng, ["x", "y", "z"], n),
+                       sparse_one = sparse_col,
+                       sparse_few = few_col)
+
+        m = fit(CopulaGenerator(), df; rng = MersenneTwister(2))
+        syn = sample(m, 100; rng = MersenneTwister(3))
+
+        # Neither should be treated as an identifier, so neither is dropped.
+        @test :sparse_one in Symbol.(names(syn))
+        @test :sparse_few in Symbol.(names(syn))
+
+        # A genuine identifier - many observations, all distinct - still is one.
+        df2 = DataFrame(num = randn(rng, n),
+                        cat = rand(rng, ["x", "y"], n),
+                        key = ["id_" * string(i) for i in 1:n])
+        m2 = fit(CopulaGenerator(), df2; rng = MersenneTwister(4))
+        syn2 = sample(m2, 100; rng = MersenneTwister(5))
+        @test !(:key in Symbol.(names(syn2)))
+    end
+
+    # ════════════════════════════════════════════════════════════════════════
     # Hinting an integer column as continuous
     # ════════════════════════════════════════════════════════════════════════
     #

@@ -1,5 +1,10 @@
 # ─── Identifier Detection & Fill ────────────────────────────────────────────
 
+# Minimum non-missing observations before the auto-detection heuristic may
+# call a column an identifier. Below this, all-distinct says nothing: any
+# column looks like a key when you have only a few values of it.
+const MIN_IDENTIFIER_OBSERVATIONS = 20
+
 """
     _resolve_identifiers(...) -> Set{Symbol}
 
@@ -37,6 +42,15 @@ function _resolve_identifiers(col_names::Vector{Symbol},
         n_nonmissing = length(nm)
         n_unique = length(unique(nm))
         ratio = n_unique / n_nonmissing
+
+        # Uniqueness among a handful of observations is not evidence of a key.
+        # A column with a single non-missing value scores a ratio of 1.0 and is
+        # obviously a constant; without this floor it was classified as an
+        # identifier and silently dropped from the output. Found on OpenML's
+        # `anneal`, whose :bc column has 898 rows and one observation.
+        if n_nonmissing < MIN_IDENTIFIER_OBSERVATIONS
+            continue
+        end
 
         if ratio >= 0.9
             @info "Column :$name auto-detected as identifier " *
