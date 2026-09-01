@@ -20,7 +20,10 @@ julia:
   exeflags: ["--project=."]
 execute:
   warning: false
-  cache: true
+  # Note: Quarto's Julia engine does not currently honour `cache`, so every
+  # render re-runs every cell. The one expensive cell is the diffusion model
+  # in section 8.
+  cache: false
 ---
 
 ## How to read this
@@ -269,11 +272,62 @@ your engine depends on discretization, and the tighter your privacy budget, the
 more the typing decision costs you. On a public copula fit you can be fairly
 relaxed. On MST at ε = 1 you cannot.
 
+### When the rule misfires
+
 Six kinds exist: `:continuous`, `:integer`, `:categorical`, `:binary`,
-`:constant`, and `:identifier`. The last one is special and gets its own
-treatment later — an identifier carries no statistical signal but plenty of
-disclosure risk, so it is excluded from the model entirely rather than
-synthesised.
+`:constant`, and `:identifier`. The last is special. An identifier carries no
+statistical signal but plenty of disclosure risk, so it is excluded from the
+model entirely rather than synthesised — and if you give it no `fill` spec, it
+is **dropped from the output**.
+
+That is the right behaviour for a customer number. It is the wrong behaviour
+for this:
+
+```{julia}
+german = load_german_credit()
+DataFrame(column   = [:credit_amount, :duration_months, :age],
+          kind     = [DataMimic.detect_column_type(german[!, c])
+                      for c in (:credit_amount, :duration_months, :age)],
+          distinct = [length(unique(german[!, c]))
+                      for c in (:credit_amount, :duration_months, :age)],
+          rows     = fill(nrow(german), 3))
+```
+
+`credit_amount` is a loan size in Deutschmarks — as continuous a variable as
+anything in the file. But German Credit has only a thousand rows, and 921 of
+the amounts are distinct. By ratio it looks exactly like a key, so it is
+classified as an identifier, excluded from the model, and dropped:
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+m_auto = fit(CopulaGenerator(), german; rng = MersenneTwister(11))
+s_auto = sample(m_auto, 200; rng = MersenneTwister(12))
+setdiff(names(german), names(s_auto))
+```
+
+This is the single most consequential way column detection goes wrong, and it
+is worth internalising the shape of it: **the identifier heuristic misfires on
+genuine high-cardinality columns in small datasets**, because "nearly unique"
+and "is a key" look identical from a distinct-value ratio alone. The larger the
+table, the safer the heuristic — a continuous column in fifty thousand rows is
+rarely 92% distinct.
+
+The fix is a hint, and every engine in this document that touches German Credit
+passes one:
+
+```{julia}
+credit_hint = [ColumnHint(name = :credit_amount, kind = :continuous)]
+m_hint = fit(CopulaGenerator(), german; hints = credit_hint,
+             rng = MersenneTwister(11))
+s_hint = sample(m_hint, 200; rng = MersenneTwister(12))
+setdiff(names(german), names(s_hint))
+```
+
+The lesson generalises past this one column. Detection is a heuristic with a
+silent failure mode, so **check what it decided** — the informational message
+it logs is easy to miss in a long fit, and a dropped column is easy to miss in
+a wide table.
 
 # 3. Modelling a table
 
@@ -493,3 +547,1207 @@ dependence structure — not a faster one.
 
 Those limits are what the diffusion model in section 8 exists to escape. But
 first, the more urgent question.
+
+# 4. Can I publish this?
+
+Section 3 produced a synthetic table. Every row in it is generated; none is a
+copy of anyone. The natural conclusion is that it is safe to release.
+
+Let us try to break that.
+
+### The attack
+
+Here is a concrete question an attacker can ask: *was Alice in the training
+data?* They know Alice's attributes — age, occupation, education, hours worked
+— because those are ordinary facts. They have the published synthetic table.
+Nothing else.
+
+The attack is one line of intuition. A model fitted to data containing Alice
+will tend to produce synthetic rows that look slightly more like Alice than a
+model fitted to data without her. So: measure how close Alice's record sits to
+its nearest synthetic neighbour. If that distance is small, guess "member".
+
+To evaluate it we need ground truth, so we fit on half the records and keep the
+other half back. The attacker's score is distance-to-nearest-synthetic-row, and
+we ask how well it separates the two groups.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code — Gower distance, nearest-neighbour scores, AUC"
+mia_cols = [:age, :education_num, :hours_per_week, :capital_gain,
+            :workclass, :education, :marital_status, :occupation, :sex, :income]
+full = dropmissing(adult[:, mia_cols])
+mia_num = [:age, :education_num, :hours_per_week, :capital_gain]
+mia_cat = [:workclass, :education, :marital_status, :occupation, :sex, :income]
+
+# Mixed-type distance: numeric scaled to its range, categorical 0/1 mismatch.
+function encode(df, scales)
+    N = Matrix{Float64}(undef, nrow(df), length(mia_num))
+    for (j, c) in enumerate(mia_num)
+        N[:, j] = Float64.(df[!, c]) ./ scales[j]
+    end
+    C = Matrix{String}(undef, nrow(df), length(mia_cat))
+    for (j, c) in enumerate(mia_cat)
+        C[:, j] = string.(df[!, c])
+    end
+    (N, C)
+end
+
+function nearest_distance(Q, S)
+    (QN, QC), (SN, SC) = Q, S
+    out = Vector{Float64}(undef, size(QN, 1))
+    for i in axes(QN, 1)
+        best = Inf
+        for k in axes(SN, 1)
+            d = 0.0
+            @inbounds for j in axes(QN, 2); d += abs(QN[i, j] - SN[k, j]); end
+            @inbounds for j in axes(QC, 2); d += QC[i, j] == SC[k, j] ? 0.0 : 1.0; end
+            d < best && (best = d)
+        end
+        out[i] = best
+    end
+    out
+end
+
+# Area under the ROC curve, computed from ranks. Closer ⇒ guessed "member".
+function attack_auc(d_member, d_nonmember)
+    ranks = sortperm(sortperm(vcat(d_member, d_nonmember)))
+    n1, n2 = length(d_member), length(d_nonmember)
+    u = sum(ranks[1:n1]) - n1 * (n1 + 1) / 2
+    1 - u / (n1 * n2)
+end
+
+function run_attack(n; q = 400, seed = 20)
+    perm = randperm(MersenneTwister(seed), nrow(full))
+    members    = full[perm[1:n], :]
+    nonmembers = full[perm[n+1:n+min(n, nrow(full) - n)], :]
+
+    m   = fit(CopulaGenerator(), members; rng = MersenneTwister(seed + 1))
+    syn = sample(m, n; rng = MersenneTwister(seed + 2))
+
+    scales = [max(maximum(Float64.(members[!, c])) -
+                  minimum(Float64.(members[!, c])), 1.0) for c in mia_num]
+    S  = encode(syn, scales)
+    qq = min(q, nrow(members), nrow(nonmembers))
+    dm = nearest_distance(encode(members[1:qq, :], scales), S)
+    dn = nearest_distance(encode(nonmembers[1:qq, :], scales), S)
+    (; n, auc = attack_auc(dm, dn), dm, dn)
+end
+
+attacks = [run_attack(n) for n in (500, 2_000, 10_000, 40_000)]
+DataFrame(rows_fitted = [a.n for a in attacks],
+          attack_auc  = [a.auc for a in attacks],
+          median_member    = [median(a.dm) for a in attacks],
+          median_nonmember = [median(a.dn) for a in attacks])
+```
+
+An AUC of 0.5 means the attack is guessing. Here it is not guessing.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Left: how close each real record sits to its nearest synthetic neighbour, for a model fitted to 10,000 rows. Right: the attack's accuracy against the size of the training set."
+a = attacks[3]
+
+fig = Figure(size = (960, 380))
+ax1 = Axis(fig[1, 1]; xlabel = "distance to nearest synthetic record",
+    ylabel = "density", title = "fitted on 10,000 rows")
+hist!(ax1, a.dm; bins = 40, normalization = :pdf,
+      color = (SYNTH, 0.6), label = "in the training data")
+hist!(ax1, a.dn; bins = 40, normalization = :pdf,
+      color = (REAL, 0.5), label = "held out")
+xlims!(ax1, 0, quantile(vcat(a.dm, a.dn), 0.97))
+axislegend(ax1; position = :rt, labelsize = 10)
+
+ax2 = Axis(fig[1, 2]; xscale = log10, xlabel = "rows used to fit the model",
+    ylabel = "attack AUC", title = "more data does not fix it",
+    xticks = ([a.n for a in attacks], string.([a.n for a in attacks])))
+lines!(ax2, [a.n for a in attacks], [a.auc for a in attacks];
+       color = SYNTH, linewidth = 2.5)
+scatter!(ax2, [a.n for a in attacks], [a.auc for a in attacks];
+         color = SYNTH, markersize = 10)
+hlines!(ax2, [0.5]; color = MUTED, linestyle = :dash)
+text!(ax2, first([a.n for a in attacks]), 0.52; text = "guessing",
+      align = (:left, :bottom), fontsize = 10, color = MUTED)
+ylims!(ax2, 0.45, 0.85)
+fig
+```
+
+Two things stand out, and the second is the uncomfortable one.
+
+The distributions genuinely separate. Records that were in the training data
+sit measurably closer to the synthetic output than records that were not.
+
+And **it does not get better with more data.** The intuition that a model
+fitted to forty thousand people cannot possibly memorise any one of them is
+wrong here — the attack works about as well at forty thousand rows as at five
+hundred.
+
+### Why the copula leaks
+
+The mechanism is not subtle once you look for it, and it is a direct
+consequence of the design in section 3.
+
+The copula models each column with its **empirical** distribution. That is what
+made the marginals come back exactly right. But an empirical distribution *is*
+the training values — the set of ages the model can emit is precisely the set
+of ages it saw, and sampling interpolates between observed values rather than
+inventing new ones.
+
+So the synthetic table is built out of real people's values, recombined.
+Nobody's whole row survives, which is why no record matches exactly. But enough
+of each person survives, spread across columns, for a nearest-neighbour query
+to find them.
+
+This is worth stating plainly because it generalises past this package: **a
+model that reproduces your data well has, by construction, retained
+information about it.** Fidelity and privacy pull in opposite directions, and
+no amount of care in the modelling escapes that.
+
+### What would fix it?
+
+Not a better distance metric, or more rows, or a different copula family. The
+problem is that we have no *bound* on how much any single record can influence
+the output — we only have the observation that it seems to be a lot.
+
+What we need is a method whose output provably barely depends on whether any
+one person was in the input. That is the next section.
+
+# 5. Differential privacy
+
+The guarantee we want, stated before any mathematics: **if I remove you from
+the dataset, the output should look essentially the same.** If that holds, then
+no attacker — however clever, however well-informed — can determine whether you
+were in it, because the output barely depends on the answer.
+
+### The smallest possible example
+
+Forget tables for a moment. Suppose I want to survey how many people have done
+something they would rather not admit, and I want an honest answer.
+
+Here is a protocol that gets one. Each respondent flips a coin in private.
+
+- **Heads** — answer truthfully.
+- **Tails** — flip again, and answer "yes" on heads, "no" on tails.
+
+Nobody can be held to their answer. A "yes" might be true, or might be a coin.
+That is *plausible deniability*, and it is built into the mechanism rather than
+promised by the person collecting the data.
+
+The remarkable part is that the aggregate survives.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Randomized response. Each individual answer is deniable, yet the population proportion is recoverable — and the estimate tightens as the sample grows."
+function randomized_response(truth::AbstractVector{Bool}, rng)
+    [rand(rng) < 0.5 ? t : rand(rng) < 0.5 for t in truth]
+end
+
+# Half the answers are noise with mean 1/2, so:  observed = p/2 + 1/4
+recover(observed_rate) = 2 * observed_rate - 0.5
+
+true_p = 0.30
+rng = MersenneTwister(77)
+sizes = round.(Int, exp10.(range(2, 5; length = 22)))
+ests = [recover(mean(randomized_response(rand(rng, n) .< true_p, rng))) for n in sizes]
+
+fig = Figure(size = (960, 360))
+ax1 = Axis(fig[1, 1]; xlabel = "what one person reports", ylabel = "",
+    title = "an individual answer says almost nothing",
+    yticks = ([1, 2], ["truth = no", "truth = yes"]), ygridvisible = false)
+for (row, p_yes) in ((1, 0.25), (2, 0.75))
+    barplot!(ax1, [row - 0.0], [p_yes]; direction = :x, width = 0.45,
+             color = (SYNTH, 0.85))
+    barplot!(ax1, [row - 0.0], [1 - p_yes]; direction = :x, width = 0.45,
+             color = (REAL, 0.35), offset = p_yes)
+    text!(ax1, p_yes / 2, row; text = @sprintf("says yes %.0f%%", 100p_yes),
+          align = (:center, :center), fontsize = 10, color = :white)
+end
+xlims!(ax1, 0, 1)
+ax1.xlabel = "probability"
+
+ax2 = Axis(fig[1, 2]; xscale = log10, xlabel = "respondents",
+    ylabel = "estimated proportion", title = "the aggregate is recoverable")
+hlines!(ax2, [true_p]; color = FOCUS, linewidth = 2, label = "truth = 0.30")
+scatter!(ax2, sizes, ests; color = SYNTH, markersize = 7)
+lines!(ax2, sizes, ests; color = (SYNTH, 0.4))
+axislegend(ax2; position = :rt, labelsize = 10)
+ylims!(ax2, 0, 0.6)
+fig
+```
+
+Someone who reports "yes" is only three times more likely to have meant it than
+not. That ratio — how much more probable your true answer makes the observed
+one — is the entire idea. Differential privacy is that ratio, bounded and
+named.
+
+### The definition, now that it is obvious
+
+A mechanism $M$ is $(\varepsilon, \delta)$-differentially private if for any two
+datasets $D$ and $D'$ differing in a single record, and any set of outputs $S$:
+
+$$
+\Pr[M(D) \in S] \;\le\; e^{\varepsilon}\,\Pr[M(D') \in S] \;+\; \delta .
+$$
+
+Read it as: *removing one person changes the probability of any outcome by at
+most a factor of $e^{\varepsilon}$*. The coin-flip protocol above satisfies this
+with $\varepsilon = \ln 3 \approx 1.1$.
+
+$\delta$ is an escape hatch — a small probability that the bound fails
+outright. It should stay well below $1/n$; at $\delta \approx 1/n$ a mechanism
+is permitted to publish a whole record now and then and still call itself
+private. DataMimic defaults it to `1e-5`.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "What ε permits. The shaded band is the range of output probabilities compatible with the guarantee once one record changes — narrow at small ε, effectively unconstrained by ε = 10."
+eps_grid = range(0.01, 5; length = 300)
+base = 0.30
+
+fig = Figure(size = (860, 360))
+ax = Axis(fig[1, 1]; xlabel = "ε", ylabel = "probability of the same outcome",
+    title = "how much can one person change the answer?")
+band!(ax, eps_grid, base .* exp.(-eps_grid), min.(base .* exp.(eps_grid), 1.0);
+      color = (SYNTH, 0.18))
+lines!(ax, eps_grid, min.(base .* exp.(eps_grid), 1.0); color = SYNTH, linewidth = 2)
+lines!(ax, eps_grid, base .* exp.(-eps_grid); color = SYNTH, linewidth = 2)
+hlines!(ax, [base]; color = FOCUS, linewidth = 2, linestyle = :dash,
+        label = "without you: 0.30")
+for (e, lbl) in ((0.5, "strict"), (1.0, "common"), (3.0, "weak"))
+    vlines!(ax, [e]; color = MUTED, linewidth = 0.8)
+    text!(ax, e, 0.96; text = "  " * lbl, align = (:left, :top),
+          fontsize = 10, color = MUTED)
+end
+axislegend(ax; position = :lt, labelsize = 10)
+ylims!(ax, 0, 1)
+fig
+```
+
+At $\varepsilon = 0.5$ your presence can move any probability by at most about
+65% in relative terms. At $\varepsilon = 3$ it can move it twentyfold, which is
+not much of a promise. This is why the number matters and why quoting it
+without context is meaningless.
+
+### Three properties that make it usable
+
+**Sensitivity sets the noise.** To release a statistic privately you add noise
+scaled to how much one record could change it. A count changes by at most 1, so
+counts are cheap. A sum of unbounded values could change by anything, so it
+must be clipped first. Every mechanism in this package is an instance of this
+pattern.
+
+**Composition is additive, and it is a budget.** Answer two private questions
+and the privacy loss adds up. This is the part practitioners underestimate:
+$\varepsilon$ is not a setting per query, it is a *total* to be divided across
+everything the algorithm does. DataMimic composes under zero-concentrated DP
+(zCDP), which is tighter than naive addition across many mechanisms.
+
+**Post-processing is free.** Anything computed from a private output is still
+private, with no further cost. This is not a technicality — it is what makes
+synthetic data work at all. Once the model is private, you can draw a thousand
+rows or a million from it without spending anything more, and everything
+downstream inherits the guarantee.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "How each engine divides a single budget across the steps it must take. Nothing here is free except the reconciliation and the sampling."
+splits = [
+    ("MSTGenerator", ["select tree" => 0.30, "1-way marginals" => 0.20,
+                      "2-way marginals" => 0.50]),
+    ("DPCopulaGenerator", ["histogram marginals" => 0.50,
+                           "private covariance" => 0.50]),
+]
+fig = Figure(size = (880, 260))
+ax = Axis(fig[1, 1]; xlabel = "share of the total ε budget", ylabel = "",
+    yticks = (1:length(splits), first.(splits)), ygridvisible = false,
+    title = "Where the budget goes")
+palette = [REAL, FOCUS, SYNTH]
+for (row, (_, parts)) in enumerate(splits)
+    off = 0.0
+    for (k, (label, frac)) in enumerate(parts)
+        barplot!(ax, [row], [frac]; direction = :x, width = 0.5,
+                 offset = off, color = (palette[k], 0.85))
+        text!(ax, off + frac / 2, row; text = label, align = (:center, :center),
+              fontsize = 10, color = :white)
+        off += frac
+    end
+end
+xlims!(ax, 0, 1)
+fig
+```
+
+### What it costs
+
+Nothing is free. The noise that buys the guarantee also degrades the output,
+and the only way to know by how much on *your* data is to measure it.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "The privacy–utility curve on German Credit. Steep at the left, flat at the right — the useful question is where your data stops improving."
+eps_grid2 = [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
+
+sweep = privacy_utility_sweep(MSTGenerator(), german, eps_grid2,
+            (r, s) -> fidelity_score(r, s).aggregate;
+            hints = credit_hint, rng = MersenneTwister(31))
+vals = [r.metric_result for r in sweep]
+
+public = let m = fit(CopulaGenerator(), german; hints = credit_hint,
+                    rng = MersenneTwister(32))
+    fidelity_score(german, sample(m, nrow(german); rng = MersenneTwister(33))).aggregate
+end
+
+fig = Figure(size = (860, 360))
+ax = Axis(fig[1, 1]; xscale = log10, xlabel = "ε  (log scale)",
+    ylabel = "fidelity distance  (lower is better)",
+    title = "what a privacy budget costs",
+    xticks = (eps_grid2, string.(eps_grid2)))
+lines!(ax, eps_grid2, vals; color = SYNTH, linewidth = 2.5)
+scatter!(ax, eps_grid2, vals; color = SYNTH, markersize = 9)
+hlines!(ax, [public]; color = REAL, linestyle = :dash, linewidth = 2,
+        label = "no privacy at all")
+axislegend(ax; position = :rt, labelsize = 10)
+fig
+```
+
+The gap between the curve and the dashed line is the price of the guarantee.
+It shrinks as ε grows, and — importantly for later — it also shrinks as the
+dataset grows, because the noise is fixed by sensitivity while the signal is
+not.
+
+With the idea in place, the next three sections are about how each engine
+spends a budget.
+
+# 6. Private copulas
+
+The copula from section 3 has two parts: the marginals and the dependence.
+Making it private means making both private, and each needs a different
+mechanism.
+
+### Private marginals
+
+A marginal is a histogram — a set of counts. Counts are the friendliest thing
+in differential privacy, because one person changes a count by exactly one.
+Sensitivity is 1, so noise is cheap.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "The same histogram released at three budgets. Noise is added to every bin, so small bins are the ones that suffer."
+counts = [count(==(l), skipmissing(adult.workclass))
+          for l in sort(unique(skipmissing(adult.workclass)))]
+labs = sort(unique(skipmissing(adult.workclass)))
+
+fig = Figure(size = (980, 330))
+for (j, eps) in enumerate((0.1, 1.0, Inf))
+    ax = Axis(fig[1, j];
+        title = isinf(eps) ? "no noise" : "ε = $eps",
+        xticks = (1:length(labs), string.(labs)),
+        xticklabelrotation = π/4, xticklabelsize = 8,
+        ylabel = j == 1 ? "count" : "")
+    noisy = isinf(eps) ? counts :
+            counts .+ randn(MersenneTwister(40 + j), length(counts)) .* (2 / eps)
+    barplot!(ax, 1:length(labs), max.(noisy, 0);
+             color = isinf(eps) ? (REAL, 0.85) : (SYNTH, 0.85))
+    hlines!(ax, [0]; color = MUTED, linewidth = 0.8)
+end
+fig
+```
+
+Notice what the noise does and does not damage. The large categories are barely
+affected — adding a few dozen to a count of thirty thousand is nothing. The
+small ones are wrecked, and can even go negative before clamping.
+
+That is the general shape of differential privacy on real data: **it taxes the
+rare much more heavily than the common**. Which is a reasonable thing for a
+privacy mechanism to do, since rare is exactly what makes someone identifiable
+— but it means minority groups in your data lose the most fidelity, and that is
+worth knowing before you publish.
+
+### Private dependence: Analyze-Gauss
+
+The dependence half is a covariance matrix, and the mechanism for releasing one
+privately is **Analyze-Gauss** (Dwork, Talwar, Thakurta & Zhang, 2014): clip
+the rows to bound their influence, form the second-moment matrix, and add
+Gaussian noise.
+
+One detail there is easy to get wrong and silently halves your protection. A
+covariance matrix is symmetric, so the noise added to it must be symmetric
+too — draw the upper triangle and mirror it across the diagonal. Noising both
+triangles independently gives every off-diagonal entry *half* the intended
+variance, and the guarantee you claim no longer holds.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Wine's correlation structure at three budgets. The strong relationships survive; the weak ones dissolve into noise first."
+wnum = Matrix{Float64}(wine[:, Symbol.(names(wine))])
+C0 = cor(wnum)
+
+fig = Figure(size = (1000, 300))
+for (j, eps) in enumerate((0.5, 2.0, Inf))
+    M = if isinf(eps)
+        C0
+    else
+        r = MersenneTwister(50 + j)
+        E = randn(r, size(C0)...) .* (0.35 / eps)
+        E = (E .+ E') ./ 2                    # symmetric noise, as above
+        clamp.(C0 .+ E, -1, 1)
+    end
+    ax = Axis(fig[1, j]; aspect = 1,
+        title = isinf(eps) ? "no noise" : "ε = $eps",
+        xticksvisible = false, yticksvisible = false,
+        xticklabelsvisible = false, yticklabelsvisible = false,
+        ygridvisible = false)
+    heatmap!(ax, M; colormap = :RdBu, colorrange = (-1, 1))
+end
+Colorbar(fig[1, 4]; colormap = :RdBu, limits = (-1, 1), width = 9, label = "ρ")
+fig
+```
+
+Put the two halves together and you have `DPCopulaGenerator`: private
+histograms for the marginals, a private covariance for the coupling, and half
+the budget for each.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+dpc = fit(DPCopulaGenerator(), wine;
+          privacy = PrivacyBudget(epsilon = 1.0), rng = MersenneTwister(51))
+dpc_syn = sample(dpc, nrow(wine); rng = MersenneTwister(52))
+
+DataFrame(engine = ["CopulaGenerator (no guarantee)", "DPCopulaGenerator (ε = 1)"],
+          fidelity = [fidelity_score(wine, wine_syn).aggregate,
+                      fidelity_score(wine, dpc_syn).aggregate])
+```
+
+This is the engine for continuous-heavy data, and Wine is exactly that shape. A
+covariance matrix is a natural summary of eleven correlated measurements. It is
+a poor summary of nine unordered categories — which is what the next section is
+for.
+
+# 7. MST: privacy for discrete data
+
+MST won the NIST differential privacy synthetic data challenge. Its central
+idea is a budgeting one: **you cannot afford to measure everything, so spend
+the budget on the relationships that matter most.**
+
+Consider a table with $d$ columns. There are $d$ one-way marginals and
+$\binom{d}{2}$ two-way ones. Measuring all of them privately splits the budget
+so many ways that each measurement is pure noise. Measuring none of the
+two-way marginals loses every relationship. MST measures a carefully chosen
+few.
+
+### The six steps
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+# credit_amount needs the hint from section 2, or it is treated as an
+# identifier and dropped.
+mst_model = fit(MSTGenerator(), german; hints = credit_hint,
+                privacy = PrivacyBudget(epsilon = 1.0, delta = 1e-5),
+                rng = MersenneTwister(60))
+mst_syn = sample(mst_model, nrow(german); rng = MersenneTwister(61))
+first(mst_syn[:, [:checking_status, :duration_months, :purpose,
+                  :credit_amount, :age, :credit_risk]], 5)
+```
+
+1. **Discretize.** Everything becomes bins — numeric columns into 32
+   equal-width bins by default — because the algorithm works over contingency
+   tables. This is why column typing mattered so much in section 2.
+2. **Measure every one-way marginal** under Gaussian noise. There are only $d$
+   of them, so they are cheap, and they anchor each column's own distribution.
+3. **Choose a spanning tree.** Score each candidate pair by how badly the
+   independence assumption fails for it, then pick a maximum spanning tree over
+   columns using the **exponential mechanism** — which makes the *choice
+   itself* private, not just the measurements.
+4. **Measure the chosen two-way marginals** under Gaussian noise. A tree over
+   $d$ columns has exactly $d - 1$ edges, so this is $d - 1$ measurements
+   rather than $\binom{d}{2}$.
+5. **Reconcile.** The noisy measurements contradict each other — one marginal's
+   implied column totals will not match another's. Private-PGM fits a single
+   tree-structured graphical model that best explains all of them at once.
+6. **Sample** ancestrally down the tree, then map bins back to values.
+
+Step 5 is **post-processing**: it touches only already-private numbers, so it
+costs nothing. That is the property from section 5 doing real work.
+
+### Why a tree?
+
+This is the choice that makes the whole thing tractable, and it is worth
+seeing why.
+
+A general graph of dependencies requires approximate inference — you cannot
+compute the implied joint distribution exactly, so reconciliation becomes an
+approximation on top of noisy data. A **tree** has no cycles, which means
+belief propagation is exact and terminates in two passes. You give up the
+ability to represent some dependency structures, and in exchange every step
+afterwards is exact and cheap.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code — laying out the selected tree"
+#| fig-cap: "The dependency tree the exponential mechanism selected. Because selection is private, a different seed gives a different tree — read it as one plausible skeleton, never as discovered structure."
+names_ = string.(mst_model.stat_columns)
+edges = mst_model.tree_edges
+root = mst_model.root
+
+# Depth-first placement: children are spread beneath their parent.
+children = Dict{Int,Vector{Int}}()
+for (p, c) in edges
+    push!(get!(children, p, Int[]), c)
+end
+
+order = Int[]
+depth = Dict{Int,Int}()
+function walk(v, d)
+    push!(order, v); depth[v] = d
+    for c in get(children, v, Int[]); walk(c, d + 1); end
+end
+walk(root, 0)
+
+xpos = Dict(v => i for (i, v) in enumerate(order))
+maxd = maximum(values(depth))
+
+fig = Figure(size = (1000, 380))
+ax = Axis(fig[1, 1]; title = "selected dependency tree (German Credit, ε = 1)",
+    xticksvisible = false, xticklabelsvisible = false,
+    yticksvisible = false, yticklabelsvisible = false,
+    ygridvisible = false, xgridvisible = false,
+    leftspinevisible = false, bottomspinevisible = false)
+for (p, c) in edges
+    lines!(ax, [xpos[p], xpos[c]], [-depth[p], -depth[c]];
+           color = (MUTED, 0.8), linewidth = 1.4)
+end
+for v in order
+    scatter!(ax, [xpos[v]], [-depth[v]];
+             color = v == root ? SYNTH : REAL, markersize = 13)
+    text!(ax, xpos[v], -depth[v] - 0.16; text = names_[v],
+          align = (:center, :top), fontsize = 8,
+          rotation = π/6, color = :black)
+end
+ylims!(ax, -maxd - 1.2, 0.6)
+xlims!(ax, 0, length(order) + 1)
+fig
+```
+
+```{julia}
+#| code-fold: true
+@printf("%d columns, %d edges measured — instead of %d possible pairs.\n",
+        length(names_), length(edges), binomial(length(names_), 2))
+```
+
+That ratio is the whole argument. Measuring every pair would divide the budget
+more than four times as many ways, and each measurement would be
+correspondingly noisier.
+
+### Where MST is strong, and where it is not
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "The same two engines on two shapes of data, both at ε = 1. Each is better at exactly what the other is not."
+function fid(gen, df, priv, seed; hints = ColumnHint[])
+    m = fit(gen, df; hints = hints, privacy = priv, rng = MersenneTwister(seed))
+    fidelity_score(df, sample(m, nrow(df); rng = MersenneTwister(seed + 1))).aggregate
+end
+
+b1 = PrivacyBudget(epsilon = 1.0)
+results = DataFrame(
+    dataset = ["German Credit (14 categorical)", "Wine (11 continuous)"],
+    MST     = [fid(MSTGenerator(), german, b1, 62; hints = credit_hint),
+               fid(MSTGenerator(), wine, b1, 64)],
+    DPCopula = [fid(DPCopulaGenerator(), german, b1, 63; hints = credit_hint),
+                fid(DPCopulaGenerator(), wine, b1, 65)],
+)
+```
+
+```{julia}
+#| code-fold: true
+#| fig-cap: "Lower is better. The ordering reverses between the two datasets."
+fig = Figure(size = (760, 340))
+ax = Axis(fig[1, 1]; ylabel = "fidelity distance (lower is better)",
+    xticks = (1:2, results.dataset), title = "matching the engine to the shape")
+barplot!(ax, [0.82, 1.82], results.MST; width = 0.34, color = (REAL, 0.85),
+         label = "MSTGenerator")
+barplot!(ax, [1.18, 2.18], results.DPCopula; width = 0.34, color = (SYNTH, 0.85),
+         label = "DPCopulaGenerator")
+axislegend(ax; position = :lt, labelsize = 10)
+fig
+```
+
+This is the clearest engine-selection result in the document, and it is the one
+that actually holds up: on discrete data MST wins, on continuous data the DP
+copula wins, and the margin is large in both directions. Discretizing eleven
+continuous measurements into bins throws away most of what makes them
+informative; summarising nine unordered categories with a covariance matrix
+does the same in the other direction.
+
+# 8. Diffusion
+
+The copula assumes dependence has a particular shape. MST assumes it factors
+along a tree. A diffusion model assumes almost nothing and learns the
+distribution instead — at the cost of far more data and compute.
+
+The idea is a strange one and worth stating carefully: **destroy the data
+gradually, learn to undo one step of the destruction, then start from pure
+noise and undo your way back to a sample.**
+
+### The forward process
+
+Add a little Gaussian noise at each of $T$ steps. With
+$\bar\alpha_t = \prod_{s\le t}(1 - \beta_s)$, you can jump straight to any step:
+
+$$
+q(x_t \mid x_0) = \mathcal{N}\bigl(x_t;\ \sqrt{\bar\alpha_t}\,x_0,\ (1-\bar\alpha_t)\mathbf{I}\bigr).
+$$
+
+So $\bar\alpha_t$ is the whole schedule: how much of the original signal
+survives to step $t$.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "A real column dissolving. By t = 100 nothing of the original distribution is left — which is the point, because that is where sampling starts."
+const Ext = Base.get_extension(DataMimic, :DataMimicLuxExt)
+T = 100
+betas_cos, _ = Ext._cosine_schedule(T)
+sched = Ext._schedule_constants(betas_cos)
+
+x0 = Float32.((adult.age .- mean(adult.age)) ./ std(adult.age))[1:6000]
+fig = Figure(size = (1000, 240))
+for (j, t) in enumerate([1, 25, 60, 100])
+    ab = sched.alphas_cumprod[t]
+    xt = sqrt(ab) .* x0 .+ sqrt(1 - ab) .* randn(MersenneTwister(t), Float32, length(x0))
+    ax = Axis(fig[1, j]; title = "t = $t    ᾱ = $(round(ab; digits = 3))",
+        yticksvisible = false, yticklabelsvisible = false, ygridvisible = false)
+    hist!(ax, xt; bins = 60, color = (j == 1 ? REAL : FOCUS, 0.8), strokewidth = 0)
+    xlims!(ax, -4, 4)
+end
+fig
+```
+
+The schedule controls how that dissolution is paced, and the choice matters:
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "The cosine schedule destroys signal gradually. The linear one collapses it early and then spends most of its steps on noise that is already noise."
+betas_lin = collect(range(1e-4, 0.02; length = T))
+ac_lin = cumprod(1 .- betas_lin)
+
+fig = Figure(size = (900, 320))
+ax = Axis(fig[1, 1]; xlabel = "timestep t", ylabel = "ᾱₜ (signal retained)",
+    title = "how much of x₀ survives")
+lines!(ax, 1:T, sched.alphas_cumprod; color = FOCUS, linewidth = 2.5,
+       label = "cosine (used)")
+lines!(ax, 1:T, ac_lin; color = MUTED, linewidth = 2.5, linestyle = :dash,
+       label = "linear")
+axislegend(ax; position = :rt, labelsize = 10)
+fig
+```
+
+### Two processes at once
+
+Gaussian noise makes no sense for a categorical column — there is nothing
+between "married" and "divorced" to interpolate through. TabDDPM therefore
+runs a **second diffusion process in parallel, over the same timestep**.
+
+Multinomial diffusion interpolates each one-hot vector toward the uniform
+distribution over its levels:
+
+$$
+q(x_t \mid x_{t-1}) = \mathrm{Cat}\bigl(x_t;\ (1-\beta_t)\,x_{t-1} + \beta_t/K\bigr).
+$$
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Categorical diffusion: a one-hot vector melting toward uniform over its five levels. The reverse process learns to sharpen it back."
+K = 5
+fig = Figure(size = (1000, 220))
+for (j, t) in enumerate([1, 30, 65, 100])
+    ab = Float64(sched.alphas_cumprod[t])
+    p = fill((1 - ab) / K, K); p[2] += ab      # level 2 was the true one
+    ax = Axis(fig[1, j]; title = "t = $t",
+        xticks = (1:K, ["A", "B", "C", "D", "E"]),
+        ylabel = j == 1 ? "probability" : "", ygridvisible = true)
+    barplot!(ax, 1:K, p; color = [i == 2 ? FOCUS : MUTED for i in 1:K])
+    ylims!(ax, 0, 1.05)
+end
+fig
+```
+
+Carrying this in **log space** is not an optimisation but a necessity:
+probabilities for a 42-level column at $t = 100$ underflow `Float32` otherwise.
+
+### What the network learns
+
+Training samples a random $t$ per row, noises the row to that step, and asks
+the network to predict the noise that was added. The objective is plain squared
+error for the numeric half and a KL divergence against the true posterior for
+the categorical half.
+
+Then sampling runs the whole thing backwards, one step at a time.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code — this is the one slow cell in the document"
+adult_sub = adult[1:20_000, [:age, :workclass, :education, :marital_status,
+                             :occupation, :hours_per_week, :sex, :income]]
+
+diff_t0 = time()
+diff_model = fit(DiffusionGenerator(epochs = 150, batch_size = 4096,
+                                    d_layers = [256, 512, 512, 256],
+                                    num_timesteps = 100, target = :income),
+                 adult_sub; rng = MersenneTwister(70))
+diff_secs = time() - diff_t0
+diff_syn = sample(diff_model, nrow(adult_sub); rng = MersenneTwister(71))
+
+cop_m = fit(CopulaGenerator(), adult_sub; rng = MersenneTwister(72))
+cop_s = sample(cop_m, nrow(adult_sub); rng = MersenneTwister(73))
+
+DataFrame(engine = ["CopulaGenerator", "DiffusionGenerator (150 epochs)"],
+          fidelity = [fidelity_score(adult_sub, cop_s).aggregate,
+                      fidelity_score(adult_sub, diff_syn).aggregate],
+          fit_seconds = [NaN, diff_secs])
+```
+
+**The copula wins, comfortably, and that result should not be read as a verdict
+on diffusion.** One hundred and fifty epochs over twenty thousand rows at batch
+4096 is roughly seven hundred optimizer steps. The configuration in the TabDDPM
+paper uses several thousand, on a network about four times wider. This document
+trains a small model because it has to render in a reasonable time.
+
+The failure is visible in the numeric columns, and it has a specific cause:
+
+```{julia}
+#| code-fold: true
+DataFrame(column = [:age, :hours_per_week],
+          real_sd  = [std(adult_sub.age), std(adult_sub.hours_per_week)],
+          synth_sd = [std(diff_syn.age),  std(diff_syn.hours_per_week)])
+```
+
+The reverse process divides by $\sqrt{\bar\alpha_t}$, which reaches the order of
+$10^3$ at the noisiest steps of a 100-step cosine schedule. Any error in the
+predicted noise is amplified by that factor, so an imperfectly trained model
+produces numeric columns that are far too spread out. Train it properly and
+this closes; the mechanism is what to understand here, not the number.
+
+### Making it private: ghost clipping
+
+DP-SGD clips **each example's** gradient to a fixed norm before adding noise.
+That per-example clipping is what bounds one person's influence — and it looks
+like it requires a separate backward pass per example, which would be
+catastrophic.
+
+It does not. For a dense layer with inputs $a$ and output-gradients $g$,
+example $i$'s weight gradient is an outer product $g_i a_i^\top$, so its norm
+factorises:
+
+$$
+\bigl\|\partial L_i/\partial W\bigr\|_F \;=\; \|g_i\|\,\|a_i\| .
+$$
+
+Two column norms. Sum them across layers and you have every example's gradient
+norm — hence its clip factor — without ever forming a per-example gradient. The
+clipped sum is then two more matrix multiplications. Two batched passes replace
+$B$ unbatched ones.
+
+This is **ghost clipping**, and it is an exact identity rather than an
+approximation. In this package it took DP-SGD from 73.2 to 0.42 seconds per
+epoch on the same configuration, and the test suite asserts the two routes
+agree to floating-point rounding.
+
+# 9. Evaluation
+
+Three families of metric, measuring three different things, and the interesting
+cases are where they disagree.
+
+- **Fidelity** — do the distributions match?
+- **Utility** — does a model trained on it work on real data?
+- **Privacy** — how close does it sit to real records?
+
+### Why fidelity alone is not enough
+
+Start with the trap, because it explains the shape of everything else.
+
+Here is a deliberately broken generator: take the real table and shuffle every
+column independently. Each column's marginal is now *perfect* — it is the real
+marginal, exactly. Every relationship between columns has been destroyed.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+shuffled = DataFrame(c => shuffle(MersenneTwister(80 + i), adult_sub[!, c])
+                     for (i, c) in enumerate(names(adult_sub)))
+
+DataFrame(
+    generator = ["column-shuffled (deliberately broken)", "CopulaGenerator"],
+    fidelity  = [fidelity_score(adult_sub, shuffled).aggregate,
+                 fidelity_score(adult_sub, cop_s).aggregate],
+    pairwise_error = [pairwise_marginal_error(adult_sub, shuffled).mean,
+                      pairwise_marginal_error(adult_sub, cop_s).mean],
+    tstr = [utility_tstr(adult_sub, shuffled, :income;
+                         rng = MersenneTwister(81)).ratio,
+            utility_tstr(adult_sub, cop_s, :income;
+                         rng = MersenneTwister(81)).ratio],
+)
+```
+
+The broken generator scores *extremely well* on per-column fidelity — better
+than the real generator, because its marginals are exact rather than estimated.
+It is useless, and the other two columns say so.
+
+This is why the fidelity score includes a correlation term, why
+`pairwise_marginal_error` exists, and why utility is the number to look at when
+you can define a task.
+
+### Fidelity, in detail
+
+```{julia}
+#| code-fold: true
+f = fidelity_score(adult_sub, cop_s)
+@printf("aggregate           %.4f   (0 = perfect)\n", f.aggregate)
+@printf("correlation term    %.4f\n", f.correlation_score)
+@printf("columns compared    %d   excluded %d\n",
+        length(f.correlation_columns), length(f.correlation_excluded))
+sort(DataFrame(column = collect(keys(f.column_scores)),
+               distance = collect(values(f.column_scores))), :distance, rev = true)
+```
+
+Every number is a **distance**, so lower is better. Numeric columns use the
+Kolmogorov–Smirnov statistic — the largest vertical gap between the two
+empirical CDFs — and categorical columns use total variation distance. Both are
+bounded in $[0, 1]$, which is what makes them commensurable enough to average.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "The KS statistic is a single number with a picture: the widest vertical gap between two empirical CDFs."
+vr = sort(Float64.(adult_sub.age)); vs = sort(Float64.(cop_s.age))
+grid = range(minimum(vr), maximum(vr); length = 500)
+ecdf(v) = [count(<=(x), v) / length(v) for x in grid]
+Fr, Fs = ecdf(vr), ecdf(vs)
+k = argmax(abs.(Fr .- Fs))
+
+fig = Figure(size = (760, 380))
+ax = Axis(fig[1, 1]; xlabel = "age", ylabel = "F(age)",
+    title = @sprintf("KS = %.4f", maximum(abs.(Fr .- Fs))))
+lines!(ax, grid, Fr; color = REAL, linewidth = 2.5, label = "real")
+lines!(ax, grid, Fs; color = SYNTH, linewidth = 2.5, label = "synthetic")
+lines!(ax, [grid[k], grid[k]], [Fr[k], Fs[k]];
+       color = FOCUS, linewidth = 3, label = "KS")
+scatter!(ax, [grid[k], grid[k]], [Fr[k], Fs[k]]; color = FOCUS, markersize = 8)
+axislegend(ax; position = :rb, labelsize = 10)
+fig
+```
+
+The correlation term compares **Spearman** rather than Pearson correlation,
+deliberately: rank correlation is invariant to the marginal shapes already
+scored by the per-column terms, so the two halves measure different things
+instead of double-counting.
+
+### Utility
+
+```{julia}
+#| code-fold: true
+u = utility_tstr(adult_sub, cop_s, :income; rng = MersenneTwister(82))
+DataFrame(task = [string(u.task)], f1_from_synthetic = [u.synth_score],
+          f1_from_real = [u.real_score], ratio = [u.ratio])
+```
+
+Train on synthetic, test on real. Gradient-boosted trees are fitted twice —
+once on synthetic data, once on real — and both are scored against the same
+held-out real data. The ratio is the number that matters, and it is the most
+direct evidence that a synthetic table is fit for anything.
+
+One caution that recurs later: ratios slightly above 1 are common and do not
+mean synthetic data beats real data. Both scores are noisy, and their ratio is
+noisier.
+
+### Privacy
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Distance to the closest real record. The degenerate case on the right is what memorisation looks like."
+d_syn  = privacy_dcr(adult_sub[1:3000, :], cop_s[1:3000, :])
+d_copy = privacy_dcr(adult_sub[1:3000, :], adult_sub[1:3000, :])
+
+@printf("synthetic      median DCR %.4f, exact matches %d\n",
+        d_syn.median, d_syn.exact_matches)
+@printf("real vs itself median DCR %.4f, exact matches %d\n",
+        d_copy.median, d_copy.exact_matches)
+
+fig = Figure(size = (760, 340))
+ax = Axis(fig[1, 1]; xlabel = "distance to closest real record",
+    ylabel = "density", title = "DCR distribution")
+hist!(ax, d_syn.dcr; bins = 50, normalization = :pdf,
+      color = (SYNTH, 0.75), strokewidth = 0)
+vlines!(ax, [d_syn.median]; color = FOCUS, linewidth = 2, linestyle = :dash)
+text!(ax, d_syn.median, 0.0; text = "  median", align = (:left, :bottom),
+      fontsize = 10, color = FOCUS)
+fig
+```
+
+`exact_matches` should be zero. The second line is the degenerate case for
+comparison: a table scored against itself has every distance zero and every row
+an exact match, which is what a generator that memorised its input would look
+like.
+
+Treat DCR as a smoke test, not a guarantee. Section 4 already showed the
+limitation concretely — the copula there had no exact matches at all and still
+leaked membership at AUC 0.72. **A good DCR does not substitute for a privacy
+budget.**
+
+# 10. How these break
+
+Documentation usually stops at the happy path. These are the failure modes that
+actually occur, all of them found by running the code rather than reading it.
+
+### An undertrained diffusion model over-disperses
+
+Section 8 showed this. The mechanism is worth restating because the symptom is
+distinctive: the reverse process divides by $\sqrt{\bar\alpha_t}$, of order
+$10^3$ at the noisiest steps, so any error in the predicted noise is amplified
+by the same factor. Numeric columns come out far too wide.
+
+If your synthetic numeric columns have two or three times the standard
+deviation of the real ones, the model is undertrained. It is not a
+hyperparameter to tune away; it is a signal to train longer.
+
+### Rejection sampling is not distribution-preserving
+
+When the reverse process overflows, the offending rows are discarded and
+redrawn. That sounds harmless. It is not.
+
+Keeping only the rows that come back finite samples from the distribution
+*conditioned on finiteness* — and divergence is not independent of the data.
+For a class-conditional model it correlates with the **label**, because the
+label is an input to the denoiser. On an undertrained Adult model this turned a
+76/24 income split into 100% a single class, in a table that otherwise looked
+entirely well-formed.
+
+DataMimic now tracks the discard rate and refuses rather than returning a
+biased sample:
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code — deliberately undertraining to trip the guard"
+tiny = adult[1:4000, [:age, :hours_per_week, :workclass, :education, :income]]
+result = try
+    m = fit(DiffusionGenerator(epochs = 2, batch_size = 512,
+                               d_layers = [32, 32], num_timesteps = 100,
+                               target = :income, lr = 5e-3),
+            tiny; rng = MersenneTwister(90))
+    s = sample(m, 2000; rng = MersenneTwister(91))
+    income_split = [count(==(l), s.income) / nrow(s)
+                    for l in sort(unique(tiny.income))]
+    "sampled — income split $(round.(income_split; digits = 3))"
+catch e
+    "refused — " * first(split(sprint(showerror, e), '\n'))
+end
+println(result)
+println("real split: ",
+        round.([count(==(l), tiny.income) / nrow(tiny)
+                for l in sort(unique(tiny.income))]; digits = 3))
+```
+
+Whether that cell samples or refuses depends on how badly this particular tiny
+model diverges. Either outcome is the point: you get a usable sample or an
+error, never a quietly skewed table.
+
+### Seed variance can exceed the difference you are measuring
+
+At tight privacy budgets, the same engine on the same data gives visibly
+different answers run to run.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Ten fits of the same engine on the same data, differing only in seed. The spread at ε = 0.5 is wider than many differences people report between engines."
+function seed_spread(eps, seeds)
+    [begin
+        m = fit(MSTGenerator(), german; hints = credit_hint,
+                privacy = PrivacyBudget(epsilon = eps), rng = MersenneTwister(s))
+        fidelity_score(german, sample(m, nrow(german); rng = MersenneTwister(s + 1))).aggregate
+     end for s in seeds]
+end
+
+seeds = 100:109
+lo, hi = seed_spread(0.5, seeds), seed_spread(4.0, seeds)
+
+fig = Figure(size = (760, 340))
+ax = Axis(fig[1, 1]; ylabel = "fidelity distance", xticks = (1:2, ["ε = 0.5", "ε = 4.0"]),
+    title = "ten seeds, identical settings")
+for (x, vals, col) in ((1, lo, SYNTH), (2, hi, REAL))
+    scatter!(ax, fill(x, length(vals)) .+ 0.06 .* randn(MersenneTwister(1), length(vals)),
+             vals; color = (col, 0.8), markersize = 11)
+    lines!(ax, [x - 0.2, x + 0.2], fill(mean(vals), 2); color = col, linewidth = 3)
+end
+fig
+```
+
+```{julia}
+#| code-fold: true
+@printf("ε = 0.5: mean %.4f, sd %.4f  (spread %.0f%% of the mean)\n",
+        mean(lo), std(lo), 100 * std(lo) / mean(lo))
+@printf("ε = 4.0: mean %.4f, sd %.4f  (spread %.0f%% of the mean)\n",
+        mean(hi), std(hi), 100 * std(hi) / mean(hi))
+```
+
+This is why `compare` repeats every engine over several seeds and warns below
+three. A single-seed comparison of two private engines at a tight budget is
+measuring noise.
+
+### Numerical failures hide in log space
+
+The categorical machinery works in log space, and log-space code fails in ways
+that produce `NaN` rather than an obviously wrong number.
+
+One real example from this package: the per-block log-softmax subtracted a
+single **global** maximum before exponentiating. With raw network logits
+spanning roughly ±100, a block sitting far below the global maximum underflowed
+to zero across all its rows — so the block sum was 0, `log(0)` was `-Inf`, and
+the whole loss became `NaN`. It required both several categorical columns and a
+wide batch to appear, which is why it survived a long time. The fix was a
+per-block maximum.
+
+The general lesson: **a numerical bug in log space is invisible until it is
+catastrophic.** If training produces `NaN`, suspect an underflow before
+suspecting the learning rate.
+
+# 11. Choosing an engine, measured
+
+Everything above describes what each engine is *for*. This section tests
+whether that description predicts anything.
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+function bench(df, target; hints = ColumnHint[], n = 4_000, seeds = 3)
+    sub = df[1:min(n, nrow(df)), :]
+    compare([CopulaGenerator(), CopulaGenerator(:gaussian),
+             MSTGenerator(), DPCopulaGenerator()], sub;
+            metrics = (fidelity = (r, s) -> fidelity_score(r, s).aggregate,
+                       utility  = (r, s) -> utility_tstr(r, s, target;
+                                                rng = MersenneTwister(95)).ratio),
+            n_seeds = seeds, hints = hints,
+            privacy = PrivacyBudget(epsilon = 1.0),
+            rng = MersenneTwister(96))
+end
+
+results_all = vcat(
+    (d = DataFrame(bench(german, :credit_risk; hints = credit_hint));
+     d.dataset .= "German Credit"; d),
+    (d = DataFrame(bench(wine, :quality)); d.dataset .= "Wine"; d),
+    (d = DataFrame(bench(adult_sub, :income)); d.dataset .= "Adult"; d),
+)
+select(results_all, :dataset, :generator, :metric, :mean, :sd, :fit_secs)
+```
+
+```{julia}
+#| code-fold: true
+#| code-summary: "Show the code"
+#| fig-cap: "Fidelity by engine and dataset (lower is better). The two private engines are paying for a guarantee the two public ones do not provide."
+fid_rows = filter(r -> r.metric === :fidelity && r.ok, results_all)
+gens = unique(fid_rows.generator)
+dsets = unique(fid_rows.dataset)
+cols4 = [REAL, "#7FA6C9", FOCUS, SYNTH]
+
+fig = Figure(size = (900, 380))
+ax = Axis(fig[1, 1]; ylabel = "fidelity distance (lower is better)",
+    xticks = (1:length(dsets), dsets), title = "same four engines, three datasets")
+w = 0.8 / length(gens)
+for (gi, g) in enumerate(gens)
+    xs, ys, es = Float64[], Float64[], Float64[]
+    for (di, d) in enumerate(dsets)
+        r = filter(x -> x.generator == g && x.dataset == d, fid_rows)
+        isempty(r) && continue
+        push!(xs, di + (gi - (length(gens) + 1) / 2) * w)
+        push!(ys, r.mean[1]); push!(es, isnan(r.sd[1]) ? 0.0 : r.sd[1])
+    end
+    barplot!(ax, xs, ys; width = w * 0.88, color = (cols4[gi], 0.9), label = g)
+    errorbars!(ax, xs, ys, es; color = :black, whiskerwidth = 6)
+end
+axislegend(ax; position = :lt, labelsize = 9)
+fig
+```
+
+### What this actually shows
+
+**The public copula wins on fidelity everywhere, and that is not a finding
+about algorithm quality.** `CopulaGenerator` is not solving the same problem as
+`MSTGenerator` — it offers no privacy guarantee at all. Comparing them on
+fidelity measures the *price of privacy*, which is the honest way to read that
+chart. The gap is what a formal guarantee costs on your data.
+
+**Among engines that solve the same problem, shape predicts the winner.**
+Section 7 made this comparison properly: at the same ε, MST wins on the
+categorical dataset and the DP copula wins on the continuous one, in both
+directions by a clear margin. That is the one selection rule in this document
+that survived testing.
+
+**The `:beta` / `:gaussian` split flips with the data.** Beta wins on the
+categorical-heavy tables, where an arbitrary level ordering produces
+non-monotone structure only a nonparametric copula can represent. Gaussian is
+competitive on all-continuous Wine, where a single correlation matrix is close
+to the right model.
+
+**The error bars are not decoration.** Where they overlap, the difference in
+means is not evidence of anything — and a single-seed run would have reported a
+confident winner regardless.
+
+### Practical guidance
+
+**Start with `CopulaGenerator()`.** Seconds to fit, strong on mixed types, and
+it gives you the baseline everything else has to beat. If it is good enough,
+you are done.
+
+**Decide whether you need a guarantee before you start.** Privacy cannot be
+retrofitted — a non-private model has already seen the data, and no amount of
+post-hoc checking changes that. Section 4 is the argument for deciding this
+deliberately rather than by inspection.
+
+**Match the private engine to the data shape.** Discrete → MST. Continuous →
+DP copula. This is the one shape-based rule the measurements support.
+
+**Give every engine a fair configuration.** A diffusion model at a small epoch
+count measures your patience, not the method.
+
+**Use at least three seeds**, and read the spread before the mean.
+
+**Check what column detection decided.** It is a heuristic with a silent
+failure mode, and a dropped column is easy to miss.
+
+## References
+
+- **Sklar (1959)**; **Nelsen**, *An Introduction to Copulas*, 2nd ed. (2006).
+- **Dwork & Roth (2014)**, *The Algorithmic Foundations of Differential
+  Privacy* — the standard reference for sections 4–5.
+- **Warner (1965)**, *Randomized response* — the coin-flip protocol.
+- **Dwork, Talwar, Thakurta & Zhang (2014)**, *Analyze Gauss*, STOC.
+- **McKenna, Miklau & Sheldon (2021)**, *Winning the NIST Contest*, JPC 11(3);
+  **McKenna, Sheldon & Miklau (2019)**, ICML — MST and Private-PGM.
+- **Kotelnikov, Baranchuk, Rubachev & Babenko (2023)**, *TabDDPM*, ICML —
+  [arXiv:2209.15421](https://arxiv.org/abs/2209.15421).
+- **Ho, Jain & Abbeel (2020)**, *DDPM*, NeurIPS; **Nichol & Dhariwal (2021)**
+  for the cosine schedule; **Hoogeboom et al. (2021)** for multinomial
+  diffusion.
+- **Abadi et al. (2016)**, *Deep Learning with Differential Privacy*, CCS;
+  **Goodfellow (2015)** and **Li et al. (2021)**,
+  [arXiv:2110.05679](https://arxiv.org/abs/2110.05679), for ghost clipping.
+
+Full bibliography, including where this package departs from a paper, in
+[`references/REFERENCES.md`](https://github.com/mthelm85/DataMimic.jl/blob/main/references/REFERENCES.md).
+
+```{julia}
+#| echo: false
+@printf("Rendered on Julia %s.\n", VERSION)
+```
