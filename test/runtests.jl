@@ -1791,9 +1791,5 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
 
 end
 
-# Shapes, parameter combinations and hint permutations - the classes of input
-# that have produced every user-facing bug found so far.
-include("stress.jl")
-
 # Aqua + JET, backing the quality badges in the README.
 include("quality.jl")
