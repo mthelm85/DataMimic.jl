@@ -1384,13 +1384,19 @@ marginal, exactly. Every relationship between columns has been destroyed.
 ```{julia}
 #| code-fold: true
 #| code-summary: "Show the code"
-shuffled = DataFrame(c => shuffle(MersenneTwister(80 + i), adult_sub[!, c])
-                     for (i, c) in enumerate(names(adult_sub)))
+shuffled = DataFrame()
+for (i, c) in enumerate(names(adult_sub))
+    shuffled[!, c] = shuffle(MersenneTwister(80 + i), adult_sub[!, c])
+end
+
+f_shuf, f_cop = fidelity_score(adult_sub, shuffled), fidelity_score(adult_sub, cop_s)
 
 DataFrame(
     generator = ["column-shuffled (deliberately broken)", "CopulaGenerator"],
-    fidelity  = [fidelity_score(adult_sub, shuffled).aggregate,
-                 fidelity_score(adult_sub, cop_s).aggregate],
+    per_column = [mean(values(f_shuf.column_scores)),
+                  mean(values(f_cop.column_scores))],
+    correlation = [f_shuf.correlation_score, f_cop.correlation_score],
+    aggregate = [f_shuf.aggregate, f_cop.aggregate],
     pairwise_error = [pairwise_marginal_error(adult_sub, shuffled).mean,
                       pairwise_marginal_error(adult_sub, cop_s).mean],
     tstr = [utility_tstr(adult_sub, shuffled, :income;
@@ -1400,13 +1406,21 @@ DataFrame(
 )
 ```
 
-The broken generator scores *extremely well* on per-column fidelity — better
-than the real generator, because its marginals are exact rather than estimated.
-It is useless, and the other two columns say so.
+Read the first two columns against each other. On **per-column** distance the
+broken generator is essentially perfect — its marginals are not approximations
+of the real ones, they *are* the real ones. A metric that looked only at
+marginals would rank it top.
 
-This is why the fidelity score includes a correlation term, why
-`pairwise_marginal_error` exists, and why utility is the number to look at when
-you can define a task.
+The **correlation** column is where it falls apart, and that term is what drags
+its aggregate below the copula's despite those flawless marginals. The two
+downstream measures agree: five times the pairwise marginal error, and a
+utility ratio of about 0.57 against the copula's 1.0.
+
+So the aggregate does catch it — but only because it is not purely marginal.
+That is the design point worth taking away: **any evaluation built solely on
+per-column comparisons can be passed by a generator that has destroyed every
+relationship in your data.** Check a dependence-aware measure, and check
+utility if you can define a task.
 
 ### Fidelity, in detail
 
@@ -1571,7 +1585,7 @@ different answers run to run.
 ```{julia}
 #| code-fold: true
 #| code-summary: "Show the code"
-#| fig-cap: "Ten fits of the same engine on the same data, differing only in seed. The spread at ε = 0.5 is wider than many differences people report between engines."
+#| fig-cap: "Ten fits of the same engine on the same data, differing only in seed. Each dot is one run; the bar is the mean."
 function seed_spread(eps, seeds)
     [begin
         m = fit(MSTGenerator(), german; hints = credit_hint,
@@ -1596,15 +1610,21 @@ fig
 
 ```{julia}
 #| code-fold: true
-@printf("ε = 0.5: mean %.4f, sd %.4f  (spread %.0f%% of the mean)\n",
-        mean(lo), std(lo), 100 * std(lo) / mean(lo))
-@printf("ε = 4.0: mean %.4f, sd %.4f  (spread %.0f%% of the mean)\n",
-        mean(hi), std(hi), 100 * std(hi) / mean(hi))
+@printf("ε = 0.5: mean %.4f, sd %.4f\n", mean(lo), std(lo))
+@printf("ε = 4.0: mean %.4f, sd %.4f\n", mean(hi), std(hi))
+@printf("\nFor scale, the MST/DPCopula gap on this dataset in section 7 was %.4f.\n",
+        abs(results.MST[1] - results.DPCopula[1]))
 ```
 
-This is why `compare` repeats every engine over several seeds and warns below
-three. A single-seed comparison of two private engines at a tight budget is
-measuring noise.
+The absolute spread is larger at the tighter budget, which is the expected
+direction — more noise is being injected. But the number to hold onto is the
+last line: **one standard deviation of seed-to-seed variation is a substantial
+fraction of the engine-to-engine differences you are usually trying to
+detect.**
+
+That is why `compare` repeats every engine over several seeds and warns below
+three. A single-seed comparison of two private engines is measuring noise as
+much as method.
 
 ### Numerical failures hide in log space
 
