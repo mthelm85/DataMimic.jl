@@ -61,6 +61,16 @@ train-on-synthetic utility ratio is about 0.99 for `:beta` against 0.66 for
 `:gaussian`. Prefer the default unless you specifically want a Gaussian
 dependence structure.
 
+`:gaussian` carries one further restriction. It estimates a correlation matrix
+and factorizes it, and that factorization fails when the modelled columns are
+linearly dependent after the rank transform. Fewer complete cases than columns
+guarantees it; collinear columns can, though whether an exactly duplicated
+column trips it is a matter of round-off. DataMimic adjusts such a matrix to
+the nearest positive-definite correlation matrix and warns, rather than
+failing: a near-duplicate pair comes back at a correlation indistinguishable
+from 1, but dependence among the affected columns is approximate. `:beta`
+needs no such adjustment.
+
 A categorical column with only one observed level cannot be encoded this way,
 so it is left out of the copula and drawn independently.
 

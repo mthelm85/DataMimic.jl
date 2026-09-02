@@ -141,7 +141,45 @@ function _fit_copula(cols, copula_columns::Vector{Symbol},
 
     if copula_type == :beta
         return StatsBase.fit(Copulas.BetaCopula, U)
-    else  # :gaussian
-        return StatsBase.fit(Copulas.GaussianCopula, U)
     end
+
+    try
+        return StatsBase.fit(Copulas.GaussianCopula, U)
+    catch err
+        err isa LinearAlgebra.PosDefException || rethrow()
+    end
+
+    # The Gaussian fit takes the correlation of the normal scores and factorizes
+    # it. That correlation is singular whenever the copula columns are linearly
+    # dependent after the rank transform, and the Cholesky then throws a bare
+    # `PosDefException` from inside Distributions with nothing in it to act on.
+    #
+    # Two ordinary tables reach here: one with a duplicated or otherwise
+    # collinear column, and one with fewer complete cases than columns. Neither
+    # is a bad request, so repair the matrix rather than refusing. Found by a
+    # sweep over OpenML tables, where four datasets of 13-15 rows crashed on
+    # :gaussian while :beta handled all of them.
+    R = Matrix{Float64}(StatsBase.cor(_normal_scores(U), dims = 2))
+
+    # A constant column has zero variance, so its row and column come back NaN.
+    # Independence is what a constant column carries, so write that in rather
+    # than let the NaN reach the eigendecomposition.
+    for i in axes(R, 1), j in axes(R, 2)
+        isfinite(R[i, j]) || (R[i, j] = (i == j ? 1.0 : 0.0))
+    end
+    @warn "Gaussian copula: the $(d)x$(d) correlation matrix estimated from " *
+          "$(size(Xc, 1)) complete case(s) is singular, so it was adjusted to " *
+          "the nearest positive-definite correlation matrix. Collinear " *
+          "columns, or fewer complete cases than columns, cause this. " *
+          "Dependence among the affected columns is approximate; " *
+          "CopulaGenerator(:beta) needs no such adjustment."
+    return Copulas.GaussianCopula(_project_correlation(R))
 end
+
+# Standard normal quantile, via SpecialFunctions rather than a Distributions
+# dependency the package does not otherwise carry. The clamp keeps a
+# pseudo-observation that lands exactly on an endpoint - which the categorical
+# encoder can produce - from becoming an infinite score and poisoning the whole
+# correlation row.
+_normal_scores(U) =
+    sqrt(2.0) .* SpecialFunctions.erfinv.(2 .* clamp.(U, eps(), 1 - eps()) .- 1)

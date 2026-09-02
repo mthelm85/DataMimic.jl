@@ -3,6 +3,7 @@ using DataFrames
 using Test
 using Random
 using LinearAlgebra: eigvals
+using Statistics: cor
 using Lux, Zygote
 
 # A generator that always fails, used to check that compare() isolates a
@@ -470,6 +471,56 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         @test !(:flat in model.copula_columns)
         syn = sample(model, 40)
         @test all(==("only"), syn.flat)
+    end
+
+    @testset "singular correlation is repaired, not thrown" begin
+        # The Gaussian copula factorizes the correlation of the normal scores.
+        # Collinear columns, or fewer complete cases than columns, make that
+        # matrix singular, and the Cholesky used to escape as a bare
+        # PosDefException from inside Distributions. Found by a sweep over
+        # OpenML tables: four datasets of 13-15 rows crashed on :gaussian
+        # while :beta handled every one of them.
+        rng = MersenneTwister(2)
+
+        # Fewer complete cases than columns.
+        narrow = DataFrame()
+        for j in 1:8
+            narrow[!, Symbol("x", j)] = randn(rng, 6)
+        end
+        m = @test_logs (:warn, r"singular"i) fit(CopulaGenerator(:gaussian), narrow;
+                                                 rng = MersenneTwister(1))
+        syn = sample(m, 20; rng = MersenneTwister(3))
+        @test nrow(syn) == 20
+        @test all(isfinite, Matrix(syn))
+
+        # A duplicated column: plenty of rows, still exactly collinear.
+        dup = DataFrame()
+        for j in 1:4
+            dup[!, Symbol("y", j)] = randn(rng, 400)
+        end
+        dup[!, :y5] = dup.y1
+
+        # Whether an exactly collinear column trips the Cholesky is a matter of
+        # round-off - at 400 rows it sometimes factorizes anyway - so assert the
+        # outcome here rather than which of the two paths produced it. The
+        # narrow table above is the deterministic trigger.
+        m2 = fit(CopulaGenerator(:gaussian), dup; rng = MersenneTwister(1))
+        s2 = sample(m2, 2000; rng = MersenneTwister(3))
+        @test all(isfinite, Matrix(s2))
+
+        # The repair must preserve the dependence, not merely avoid the throw.
+        @test cor(s2.y1, s2.y5) > 0.999
+
+        @test isequal(s2, sample(m2, 2000; rng = MersenneTwister(3)))
+
+        # :beta needs no adjustment on either table.
+        @test !isnothing(fit(CopulaGenerator(), dup; rng = MersenneTwister(1)).copula)
+
+        # An ordinary table still takes the library path, with no warning.
+        plain = DataFrame(a = randn(rng, 200), b = randn(rng, 200),
+                          c = rand(rng, ["x", "y", "z"], 200))
+        m3 = fit(CopulaGenerator(:gaussian), plain; rng = MersenneTwister(1))
+        @test nrow(sample(m3, 50; rng = MersenneTwister(3))) == 50
     end
 
     # ════════════════════════════════════════════════════════════════════════
