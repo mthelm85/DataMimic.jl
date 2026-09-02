@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Engines — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=8be4f6da">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=457eeaa5">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -94,6 +94,7 @@ CopulaGenerator(:gaussian)</code></pre>
 <p><strong>How it works.</strong> Each column is mapped to a uniform pseudo-observation on [0, 1] by its own empirical CDF. A copula is fitted to those uniforms. To sample, DataMimic draws from the copula and pushes each coordinate back through the corresponding inverse CDF, which reproduces the original marginals by construction.</p>
 <p><strong>Categorical columns</strong> take part in the copula through the <em>distributional transform</em>: a level occupying the CDF interval <code class="md-code-inline">[F(k-1), F(k)]</code> maps to a uniform draw inside that interval, and sampling inverts the same step function. Dependence between categorical and numeric columns is therefore modelled rather than discarded.</p>
 <p>Two consequences are worth knowing. The association a copula can express is monotone in the level ordering, which is arbitrary for a nominal variable, so this captures a real part of the dependence but not all of it. And the two copula families differ sharply here: <code class="md-code-inline">:beta</code> is nonparametric and can represent the non-monotone structure an arbitrary ordering produces, while <code class="md-code-inline">:gaussian</code> is restricted to a single correlation matrix and cannot. On the Adult dataset the train-on-synthetic utility ratio is about 0.99 for <code class="md-code-inline">:beta</code> against 0.66 for <code class="md-code-inline">:gaussian</code>. Prefer the default unless you specifically want a Gaussian dependence structure.</p>
+<p><code class="md-code-inline">:gaussian</code> carries one further restriction. It estimates a correlation matrix and factorizes it, and that factorization fails when the modelled columns are linearly dependent after the rank transform. Fewer complete cases than columns guarantees it; collinear columns can, though whether an exactly duplicated column trips it is a matter of round-off. DataMimic adjusts such a matrix to the nearest positive-definite correlation matrix and warns, rather than failing: a near-duplicate pair comes back at a correlation indistinguishable from 1, but dependence among the affected columns is approximate. <code class="md-code-inline">:beta</code> needs no such adjustment.</p>
 <p>A categorical column with only one observed level cannot be encoded this way, so it is left out of the copula and drawn independently.</p>
 <p><strong>Cost.</strong> Fitting is a rank transform plus a copula fit — seconds on tables where the diffusion model takes many minutes. This is the engine to start with.</p>
 <p><strong>References.</strong> [Sklar 1959]; Nelsen, <em>An Introduction to Copulas</em>, 2nd ed. (2006). Copula fitting is delegated to <a href="https://github.com/lrnv/Copulas.jl">Copulas.jl</a>.</p>
@@ -197,6 +198,6 @@ model = fit(gen, df)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=8be4f6da"></script>
+  <script src="../assets/materialdocs.js?v=457eeaa5"></script>
 </body>
 </html>
