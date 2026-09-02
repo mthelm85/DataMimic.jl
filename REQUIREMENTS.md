@@ -225,9 +225,66 @@ which governs extension loading rather than dispatch, remains in force.
 > against the independence reference, and the measurements are reconciled by
 > Private-PGM before sampling.
 >
-> **Remaining difference: no domain compression.**  The reference merges bins
-> whose noisy count falls below `3σ` into a single "other" category before
-> selection, which matters on sparse categorical domains.  Not implemented here.
+> **Domain compression: implemented, after measuring it.**  The reference
+> merges bins whose noisy count falls below `3σ` into a single "other" category
+> before selection.  DataMimic now does the same, matching `mechanisms/mst.py`
+> on the threshold, on the position in the pipeline (after the 1-way
+> measurement, before selection), and on *uniform* redistribution of the merged
+> bin.
+>
+> It is applied to estimation only: the fitted root marginal and conditionals
+> are expanded back to the full domain before they are stored, so
+> `FittedMSTModel`, sampling, `_undiscretize` and the serialization format are
+> untouched by it.  The merge decision reads only the already-released noisy
+> 1-way counts, so it is post-processing and costs no budget.
+>
+> Method: pairwise marginal error, 6 seeds per cell, both arms on identical
+> data and seeds, a difference counted only when it clears the pooled seed
+> standard deviation.  A synthetic table (4,000 rows, five Zipf-distributed
+> categoricals plus one numeric) sweeping the level count `k`, then four real
+> OpenML tables chosen to *differ* in shape.
+>
+> | `k` | ε=0.5 | ε=1.0 | ε=2.0 | ε=4.0 |
+> |---|---|---|---|---|
+> | 8 | better | better | noise | noise |
+> | 32 | better | better | noise | noise |
+> | 128 | better | better | better | better |
+> | 512 | better | better | better | better |
+>
+> | table | shape | ε=0.5 | ε=1.0 | ε=2.0 | ε=4.0 |
+> |---|---|---|---|---|---|
+> | `rl` (41160) | 10,000×23, 15 nom / 8 num | better | better | better | better |
+> | `pbcseq` (516) | 1,945×19, 6 nom / 13 num | noise | better | better | better |
+> | `cjs` (473) | 2,796×35, 3 nom / 32 num | better | noise | noise | noise |
+> | `BachChoralHarmony` (4552) | 5,665×17, 15 nom / 2 num | noise | noise | **worse** | **worse** |
+>
+> **The one cost case.**  Bach regresses about 5% at ε ≥ 2.  It has the
+> smallest total domain of the four — 239 bins against `cjs` 973, `pbcseq`
+> 1,393, `rl` 5,602 — because twelve of its seventeen columns are binary.  Its
+> marginals are already well measured at that budget, so merging only discards
+> information it did not need to discard.  Compression pays when the domain is
+> large relative to what the budget can measure, and Bach's is not.  Kept on by
+> default anyway: three of four real tables and the whole synthetic sweep
+> favour it, the wins (14–17%) are larger than the loss (5%), and it is what
+> the reference does.
+>
+> **How this was nearly got wrong.**  An earlier pass ran the synthetic sweep
+> plus Bach alone, and Bach is the outlier of the four.  On that single real
+> table the conclusion drafted here was that compression should be *rejected*.
+> Two follow-up hypotheses for the regression — damage via tree selection, and
+> the incoherence of merging non-adjacent bins of a discretized *continuous*
+> column — were both tested and both wrong: dense columns are already never
+> merged, and excluding numeric columns moved Bach's ε = 2 result from 0.0723
+> to 0.0722 while deleting the entire `k = 8` synthetic benefit.  One real
+> dataset is not enough to overturn a sweep, in either direction.
+>
+> **Untested.**  The budget split below is 30/20/50 against the reference's
+> ⅓ each, so the 1-way marginals are noisier here, `σ` is larger, and more bins
+> fall below `3σ` than the reference would merge.  Whether a different split
+> would reduce Bach's cost is unknown; testing it means re-opening a decision
+> that has its own measurements behind it.
+>
+> See `benchmark/eval_compress.jl`, which runs this comparison.
 >
 > The budget split is 30% selection / 20% 1-way / 50% 2-way, against the
 > reference's ⅓ / ⅓ / ⅓.  The 1-way marginals serve mainly to anchor the

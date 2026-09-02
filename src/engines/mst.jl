@@ -70,6 +70,151 @@ function _count_oneway_noisy(col::Vector{Int}, k::Int, sigma::Float64,
     return c .+ randn(rng, k) .* sigma
 end
 
+
+# ─── Domain compression ──────────────────────────────────────────────────
+#
+# [McKenna et al. 2021] merges bins whose noisy count falls below 3σ into a
+# single "other" category before selection.  On by default, because it was
+# measured rather than assumed: better or neutral on three of four real tables
+# and on a synthetic cardinality sweep, at a cost on one dense table.  The
+# toggle stays so `benchmark/eval_compress.jl` can re-run that comparison; it
+# is internal, not public API.
+#
+# The merge decision reads only `oneway_noisy`, which has already been
+# released under its own share of the budget, so compression is
+# post-processing and costs nothing.
+#
+# Compression applies to *estimation only*.  The fitted root marginal and
+# conditionals are expanded back to the original domain before they are
+# stored, so `FittedMSTModel`, sampling, `_undiscretize` and the serialization
+# format are all untouched by it.
+const MST_DOMAIN_COMPRESSION = Ref(true)
+
+# How much the last fit actually merged.  Read by benchmark/eval_compress.jl
+# so a null result can be told apart from "nothing merged".
+const MST_COMPRESSION_STATS = Ref((bins_before = 0, bins_after = 0,
+                                   per_column = Tuple{Int,Int}[]))
+
+"""
+A grouping of a column's bins.  `groups[b]` lists the original bin indices
+folded into new bin `b`, and `map[o]` is the new bin holding original bin `o`.
+An identity compression has one original bin per group.
+"""
+struct DomainCompression
+    groups::Vector{Vector{Int}}
+    map::Vector{Int}
+end
+
+_identity_compression(k::Int) = DomainCompression([[b] for b in 1:k], collect(1:k))
+
+is_identity(c::DomainCompression) = length(c.groups) == length(c.map)
+
+"""
+Group every bin whose noisy count falls below `threshold` into one "other"
+bin, leaving the rest alone.  Returns an identity compression when there is
+nothing to gain: fewer than two low bins to merge, or no bin above the
+threshold at all — collapsing a column to a single bin would delete it rather
+than denoise it.
+"""
+function _compress_domain(counts::Vector{Float64}, threshold::Float64)
+    k = length(counts)
+    keep = [b for b in 1:k if counts[b] >= threshold]
+    low  = [b for b in 1:k if counts[b] <  threshold]
+    (length(low) < 2 || isempty(keep)) && return _identity_compression(k)
+
+    groups = Vector{Vector{Int}}()
+    for b in keep
+        push!(groups, [b])
+    end
+    push!(groups, low)
+
+    m = zeros(Int, k)
+    for (nb, g) in enumerate(groups), o in g
+        m[o] = nb
+    end
+    return DomainCompression(groups, m)
+end
+
+"""
+Rewrite the discretized columns, bin counts and noisy 1-way marginals onto the
+compressed domains.  Bin 0 means missing and is preserved.  Merging noisy
+counts adds their noise too — variance grows with the group size while the
+expected count grows with it as well, which is the whole point.
+"""
+function _apply_compressions(comps::Vector{DomainCompression},
+                             disc_data::Vector{Vector{Int}},
+                             n_bins::Vector{Int},
+                             oneway_noisy::Vector{Vector{Float64}})
+    d = length(comps)
+    new_data  = Vector{Vector{Int}}(undef, d)
+    new_bins  = Vector{Int}(undef, d)
+    new_noisy = Vector{Vector{Float64}}(undef, d)
+
+    for i in 1:d
+        c = comps[i]
+        if is_identity(c)
+            new_data[i]  = disc_data[i]
+            new_bins[i]  = n_bins[i]
+            new_noisy[i] = oneway_noisy[i]
+            continue
+        end
+        new_data[i]  = [v == 0 ? 0 : c.map[v] for v in disc_data[i]]
+        new_bins[i]  = length(c.groups)
+        new_noisy[i] = [sum(oneway_noisy[i][g]) for g in c.groups]
+    end
+    return new_data, new_bins, new_noisy
+end
+
+"""
+Spread a compressed distribution back over the original bins.
+
+Within a merged group the model holds no information distinguishing its
+members — that is exactly what made them mergeable — so the mass is split
+uniformly.  Splitting it in proportion to the noisy counts instead would
+weight by numbers that are below `3σ` and can be negative.
+"""
+function _expand_vector(c::DomainCompression, v::Vector{Float64})
+    is_identity(c) && return v
+    out = zeros(Float64, length(c.map))
+    for (nb, g) in enumerate(c.groups)
+        share = v[nb] / length(g)
+        for o in g
+            out[o] = share
+        end
+    end
+    return out
+end
+
+"""
+Expand `P(child | parent)` back to the original domains of both columns.  All
+original parent bins in one group share a row, since the model cannot tell
+them apart; each row is then split across the child group members.  Rows stay
+normalized.
+"""
+function _expand_conditional(cp::DomainCompression, cc::DomainCompression,
+                             cond::Matrix{Float64})
+    (is_identity(cp) && is_identity(cc)) && return cond
+    kp, kc = length(cp.map), length(cc.map)
+    out = Matrix{Float64}(undef, kp, kc)
+    for po in 1:kp, co in 1:kc
+        out[po, co] = cond[cp.map[po], cc.map[co]] / length(cc.groups[cc.map[co]])
+    end
+    return out
+end
+
+"""Expand a fitted root marginal and all conditionals back to full domains."""
+function _expand_measurements(comps::Vector{DomainCompression},
+                              tree_edges::Vector{Tuple{Int,Int}}, root::Int,
+                              root_marginal::Vector{Float64},
+                              conditionals::Dict{Tuple{Int,Int}, Matrix{Float64}})
+    all(is_identity, comps) && return root_marginal, conditionals
+    rm = _expand_vector(comps[root], root_marginal)
+    out = Dict{Tuple{Int,Int}, Matrix{Float64}}()
+    for (p, c) in tree_edges
+        out[(p, c)] = _expand_conditional(comps[p], comps[c], conditionals[(p, c)])
+    end
+    return rm, out
+end
 # ─── MST tree selection via exponential mechanism ─────────────────────────
 
 """
@@ -528,6 +673,18 @@ function _fit_engine(::MSTGenerator, cols, col_names, id_set, fill_dict,
     oneway_noisy = [_count_oneway_noisy(disc_data_vecs[i], bins_per_col[i],
                                         sigma_oneway, rng) for i in 1:d]
 
+    # Domain compression - post-processing on already-released counts, so it
+    # costs no budget.  Off by default; see MST_DOMAIN_COMPRESSION.
+    comps = MST_DOMAIN_COMPRESSION[] ?
+        [_compress_domain(oneway_noisy[i], 3.0 * sigma_oneway) for i in 1:d] :
+        [_identity_compression(bins_per_col[i]) for i in 1:d]
+    MST_COMPRESSION_STATS[] = (bins_before = sum(bins_per_col),
+                               bins_after = sum(length(c.groups) for c in comps),
+                               per_column = [(bins_per_col[i], length(comps[i].groups))
+                                             for i in 1:d])
+    disc_data_vecs, bins_per_col, oneway_noisy =
+        _apply_compressions(comps, disc_data_vecs, bins_per_col, oneway_noisy)
+
     n_meas  = max(d, 1)          # 1 root + (d-1) pairwise
     rho_per = rho_measure / n_meas
 
@@ -539,6 +696,10 @@ function _fit_engine(::MSTGenerator, cols, col_names, id_set, fill_dict,
     root_marginal, conditionals = _measure_mst(disc_data_vecs, bins_per_col,
                                                 tree_edges, root, oneway_noisy,
                                                 rho_per, nrows, rng)
+
+    # Back onto the original domains, so nothing downstream sees the merge.
+    root_marginal, conditionals = _expand_measurements(comps, tree_edges, root,
+                                                       root_marginal, conditionals)
 
     id_cols = [name for name in col_names if name in id_set]
 

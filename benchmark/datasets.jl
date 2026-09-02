@@ -257,3 +257,99 @@ function load_wine(; colour::Symbol = :white)
     rename!(df, Dict(n => Symbol(replace(string(n), " " => "_")) for n in names(df)))
     return df
 end
+
+# ─── OpenML ARFF datasets ─────────────────────────────────────────────────
+#
+# A small registry rather than an API client: the download URLs are resolved
+# once and pinned, so a benchmark run does not depend on OpenML's metadata
+# service being up or on adding a JSON dependency to this environment.
+#
+# These carry the property the UCI datasets above lack — genuinely
+# high-cardinality categorical columns — which is what MST's domain
+# compression acts on.
+
+const OPENML_DATASETS = Dict(
+    4552  => (name = "BachChoralHarmony",
+              url  = "https://www.openml.org/data/v1/download/1798821/BachChoralHarmony.arff",
+              note = "5,665x17, nominal-dominated, 102- and 60-level columns"),
+    41160 => (name = "rl",
+              url  = "https://www.openml.org/data/v1/download/19335533/rl.arff",
+              note = "31,406x23, mixed, one 1,855-level column"),
+    473   => (name = "cjs",
+              url  = "https://www.openml.org/data/v1/download/52585/cjs.arff",
+              note = "2,796x35, numeric-dominated, 3 nominal columns"),
+    516   => (name = "pbcseq",
+              url  = "https://www.openml.org/data/v1/download/52628/pbcseq.arff",
+              note = "1,945x19, small n, numeric-heavy"),
+)
+
+"""
+    load_openml(id::Int) -> DataFrame
+
+Download (once), cache, and parse an OpenML ARFF dataset from `OPENML_DATASETS`.
+
+Column types come from the `@attribute` declarations rather than from guessing
+at the values: several nominal columns in these tables hold levels that parse
+cleanly as numbers and must not be treated as numeric. Missing values (`?`)
+become `missing`.
+
+Rows whose field count disagrees with the header are dropped, so a parser
+problem stays distinguishable from a data problem.
+"""
+function load_openml(id::Int)
+    haskey(OPENML_DATASETS, id) ||
+        throw(ArgumentError("unknown OpenML id $id; known: " *
+                            join(sort(collect(keys(OPENML_DATASETS))), ", ")))
+    spec = OPENML_DATASETS[id]
+    ensure_data_dir()
+    path = joinpath(DATA_DIR, "openml_$(id)_$(spec.name).arff")
+    if !isfile(path)
+        @info "Downloading OpenML $id ($(spec.name))..."
+        Downloads.download(spec.url, path)
+    end
+
+    numeric = Bool[]
+    rows    = Vector{Vector{Union{Missing,String}}}()
+    in_data = false
+    trim    = ['\'', '"', ' ']
+
+    for raw in eachline(path)
+        line = strip(raw)
+        (isempty(line) || startswith(line, "%")) && continue
+        low = lowercase(line)
+        if !in_data && startswith(low, "@attribute")
+            m = match(r"^@attribute\s+(\"[^\"]*\"|'[^']*'|\S+)\s+(.*)$"i, line)
+            m === nothing && continue
+            push!(numeric, occursin(r"^(numeric|real|integer)"i,
+                                    strip(String(m.captures[2]))))
+        elseif !in_data && startswith(low, "@data")
+            in_data = true
+        elseif in_data
+            fields = map(split(line, ',')) do f
+                t = strip(f, trim)
+                (t == "?" || isempty(t)) ? missing : String(t)
+            end
+            push!(rows, collect(fields))
+        end
+    end
+
+    isempty(numeric) && error("no @attribute lines found in $path")
+    width = length(numeric)
+    rows  = filter(r -> length(r) == width, rows)
+    isempty(rows) && error("no well-formed data rows in $path")
+
+    df = DataFrame()
+    for j in 1:width
+        col = [r[j] for r in rows]
+        if numeric[j]
+            parsed = map(v -> ismissing(v) ? missing :
+                              something(tryparse(Float64, v), missing), col)
+            df[!, Symbol("V", j)] = any(ismissing, parsed) ?
+                Vector{Union{Missing,Float64}}(parsed) : Vector{Float64}(parsed)
+        else
+            df[!, Symbol("V", j)] = any(ismissing, col) ?
+                Vector{Union{Missing,String}}(col) : Vector{String}(col)
+        end
+    end
+    return df
+end

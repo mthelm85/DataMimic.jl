@@ -147,8 +147,13 @@ Papers and methods underpinning each engine and evaluation module.
   marginals, then Private-PGM reconciliation before ancestral sampling.
   Cross-checked against the reference implementation at
   [ryan112358/private-pgm](https://github.com/ryan112358/private-pgm)
-  (`mechanisms/mst.py`). Domain compression is the one remaining gap; see the
-  MST implementation note in REQUIREMENTS.md §11.
+  (`mechanisms/mst.py`), including domain compression — merging bins whose noisy
+  count falls below `3σ` before selection, with uniform redistribution of the
+  merged bin. That step was measured against its absence rather than adopted on
+  the paper's authority: better or neutral on three of four real tables and
+  across a synthetic cardinality sweep, at a ~5% cost on one unusually dense
+  table. See the MST implementation note in REQUIREMENTS.md §11 for the tables,
+  and `benchmark/eval_compress.jl` to re-run the comparison.
 
 ### Private Graphical Models
 

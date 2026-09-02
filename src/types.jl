@@ -61,9 +61,11 @@ published mechanism for adaptively chosen higher-order marginals is AIM
 (McKenna et al. 2022), which is a different algorithm rather than a setting on
 this one.
 
-Domain compression (merging low-count bins before selection) is the one part of
-the published algorithm not implemented; see the MST implementation note in
-REQUIREMENTS.md.
+Domain compression — folding bins whose noisy count falls below 3σ into one
+"other" category before selection — is included, and was measured rather than
+adopted on the paper's authority: better or neutral on three of four real
+tables, at a small cost on one whose columns are mostly binary. See the MST
+implementation note in REQUIREMENTS.md.
 """
 struct MSTGenerator <: AbstractPrivateGenerator end
 

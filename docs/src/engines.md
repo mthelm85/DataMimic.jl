@@ -213,8 +213,20 @@ categorical or naturally discrete data and loses information on continuous
 columns through binning. It also benefits more than the public engines from
 extra rows at fixed ε.
 
-**Gaps.** Domain compression — merging low-count bins before selection — is the
-one part of the published algorithm not implemented.
+**Domain compression.** Before selecting the tree, bins whose noisy count
+falls below 3σ are folded into a single "other" category per column, and the
+fitted distribution is spread back over them uniformly at the end. The merge
+reads only the noisy counts already released in step 2, so it is
+post-processing and costs no privacy budget.
+
+This helps because a sparse level carries less signal than the noise added to
+it: merging trades resolution you could not measure for a count you can. It
+is not free, though — redistributing uniformly is a biased estimate of a
+skewed tail, and that only pays while noise dominates. Measured across a
+synthetic cardinality sweep and four real tables, it was better or neutral on
+three of them and cost about 5% on one whose columns were mostly binary, and
+whose marginals were therefore already well measured. See
+`benchmark/eval_compress.jl`.
 
 **Marginal order is not a setting.** MST *is* the spanning tree over 2-way
 marginals; the tree is exactly what makes the belief propagation in step 5

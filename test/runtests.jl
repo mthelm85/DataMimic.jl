@@ -734,6 +734,103 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         end
     end
 
+    @testset "MST domain compression" begin
+        using DataMimic: _compress_domain, _identity_compression, is_identity,
+                         _expand_vector, _expand_conditional,
+                         MST_DOMAIN_COMPRESSION, MST_COMPRESSION_STATS
+
+        @testset "grouping" begin
+            # Two dense bins kept apart, three sparse ones folded together.
+            c = _compress_domain([100.0, 90.0, 1.0, 2.0, 0.5], 10.0)
+            @test !is_identity(c)
+            @test c.groups == [[1], [2], [3, 4, 5]]
+            @test c.map == [1, 2, 3, 3, 3]
+
+            # One bin below the line is not worth a merge: a group of one is
+            # the bin itself, so nothing is gained and the domain is untouched.
+            @test is_identity(_compress_domain([100.0, 90.0, 1.0], 10.0))
+
+            # Nothing above the line: collapsing every bin into one would
+            # delete the column rather than denoise it.
+            @test is_identity(_compress_domain([1.0, 2.0, 3.0], 10.0))
+
+            # Noise can push a count negative; that bin is simply sparse.
+            c2 = _compress_domain([50.0, -3.0, -1.0], 10.0)
+            @test c2.groups == [[1], [2, 3]]
+        end
+
+        @testset "expansion preserves normalization" begin
+            c = _compress_domain([100.0, 90.0, 1.0, 2.0, 0.5], 10.0)
+
+            v = _expand_vector(c, [0.5, 0.2, 0.3])
+            @test length(v) == 5
+            @test sum(v) ≈ 1.0
+            # Merged members are indistinguishable to the model, so uniform.
+            @test v[3] ≈ v[4] ≈ v[5] ≈ 0.1
+
+            ident = _identity_compression(3)
+            @test _expand_vector(ident, [0.2, 0.3, 0.5]) == [0.2, 0.3, 0.5]
+
+            cond = [0.6 0.1 0.3; 0.2 0.5 0.3; 0.1 0.1 0.8]
+            full = _expand_conditional(c, c, cond)
+            @test size(full) == (5, 5)
+            @test all(isapprox.(sum(full; dims = 2), 1.0))
+            # Rows of merged parents are copies: the model cannot tell them apart.
+            @test full[3, :] == full[4, :] == full[5, :]
+        end
+
+        @testset "end to end" begin
+            # A long Zipf tail is what compression exists for.
+            rng = MersenneTwister(4)
+            w = [1.0 / l for l in 1:120]; w ./= sum(w); cum = cumsum(w)
+            df = DataFrame(num = randn(rng, 3_000))
+            for j in 1:4
+                df[!, Symbol("c", j)] =
+                    [string(searchsortedfirst(cum, rand(rng))) for _ in 1:3_000]
+            end
+            pb = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
+
+            m = fit(MSTGenerator(), df; privacy = pb, rng = MersenneTwister(5))
+            st = MST_COMPRESSION_STATS[]
+            @test st.bins_after < st.bins_before      # something actually merged
+
+            # Everything stored must be on the ORIGINAL domain: compression is
+            # an estimation-time device and must not leak into the model.
+            nb = Dict(i => m.discretization[c].n_bins
+                      for (i, c) in enumerate(m.stat_columns))
+            @test length(m.root_marginal) == nb[m.root]
+            @test all(size(m.conditionals[(p, c)]) == (nb[p], nb[c])
+                      for (p, c) in m.tree_edges)
+            @test sum(m.root_marginal) ≈ 1.0
+            @test all(all(isapprox.(sum(c; dims = 2), 1.0))
+                      for c in values(m.conditionals))
+
+            syn = sample(m, 500; rng = MersenneTwister(6))
+            @test nrow(syn) == 500
+            @test isequal(syn, sample(m, 500; rng = MersenneTwister(6)))
+            for c in names(df)
+                eltype(df[!, c]) <: AbstractString || continue
+                @test issubset(Set(syn[!, c]), Set(df[!, c]))
+            end
+
+            # The toggle must be a true no-op, so the benchmark's off arm
+            # really is the uncompressed mechanism.
+            prev = MST_DOMAIN_COMPRESSION[]
+            MST_DOMAIN_COMPRESSION[] = false
+            try
+                a = fit(MSTGenerator(), df; privacy = pb, rng = MersenneTwister(5))
+                b = fit(MSTGenerator(), df; privacy = pb, rng = MersenneTwister(5))
+                @test a.tree_edges == b.tree_edges
+                @test a.root_marginal == b.root_marginal
+                @test MST_COMPRESSION_STATS[].bins_after ==
+                      MST_COMPRESSION_STATS[].bins_before
+            finally
+                MST_DOMAIN_COMPRESSION[] = prev
+            end
+            @test MST_DOMAIN_COMPRESSION[]            # restored, and on by default
+        end
+    end
+
     # ════════════════════════════════════════════════════════════════════════
     # DPCopulaGenerator — fit + sample
     # ════════════════════════════════════════════════════════════════════════
