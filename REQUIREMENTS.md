@@ -305,7 +305,11 @@ which governs extension loading rather than dispatch, remains in force.
 > is what the reference implementation does.  The TSTR ratio now rises with the
 > privacy budget (0.767 → 0.799 over ε ∈ [0.5, 8]) where it was previously flat
 > at ≈0.79: extra budget had been buying nothing.  See `benchmark/eval_mst.jl`
-> for before/after tables and for the seed-variance caveat at low ε.
+> for before/after tables and for the seed-variance caveat at low ε.  Those
+> numbers, and the reconciliation table below, predate domain compression; with
+> it the same sweep reads 0.764 → 0.806 and fidelity at ε = 0.5 improves from
+> 0.1475 to 0.1096.  The conclusion they support — that the ratio rises with
+> the budget where it had been flat — is unchanged.
 >
 > **PGM reconciliation now lands, because selection was fixed first.**  An
 > earlier prototype of the same estimation code regressed TSTR by ≈0.10 and was

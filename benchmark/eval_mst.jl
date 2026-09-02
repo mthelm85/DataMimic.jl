@@ -31,6 +31,24 @@
 #     4.0    0.1080     0.0636   0.6413    0.8005
 #     8.0    0.1061     0.0627   0.6404    0.7993
 #
+# Current, with domain compression added (single seed, like the tables above):
+#
+#     eps    fidelity   corr     TSTR F1   ratio
+#     0.5    0.1096     0.0687   0.6119    0.7638
+#     1.0    0.1090     0.0688   0.6529    0.8149
+#     2.0    0.1090     0.0696   0.6473    0.8079
+#     4.0    0.1079     0.0680   0.6467    0.8072
+#     8.0    0.1077     0.0677   0.6455    0.8057
+#
+# Compression buys fidelity where the budget is tight - 0.1475 -> 0.1096 at
+# eps = 0.5, a 26% improvement - and changes almost nothing by eps = 8. That
+# is the shape to expect: it trades resolution you could not measure for a
+# count you can, and at a generous budget you could already measure it. The
+# TSTR differences here sit inside the seed noise this header warns about and
+# should NOT be read as real; only the fidelity column moves enough to argue
+# about from a single seed. See benchmark/eval_compress.jl for the multi-seed
+# comparison.
+#
 # Note that the TSTR ratio now RISES with epsilon (0.767 -> 0.799) where before
 # it was flat at ~0.79.  Flatness was the symptom of selection being a uniform
 # random draw: extra budget bought nothing.  The eps = 0.5 rows differ by less

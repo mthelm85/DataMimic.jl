@@ -157,9 +157,32 @@ function wide_table(n; seed = 7)
     df
 end
 
+"""
+A table with genuinely high-cardinality categoricals, Zipf-distributed so the
+tails are sparse rather than uniform.
+
+Categorical columns get one bin per level - `MST_DEFAULT_BINS` caps only
+numeric columns - and `_edge_scores` builds an `n_bins[i] x n_bins[j]` table
+for every column pair, so MST cost is quadratic in level count. Nothing else
+in this suite exercises that.
+"""
+function hicard_table(n; seed = 11)
+    rng = MersenneTwister(seed)
+    df = DataFrame(num1 = randn(rng, n), num2 = randn(rng, n))
+    for (j, K) in enumerate([512, 256, 64])
+        w = [1.0 / l for l in 1:K]
+        w ./= sum(w)
+        cum = cumsum(w)
+        df[!, Symbol("cat", j)] =
+            [string(searchsortedfirst(cum, rand(rng))) for _ in 1:n]
+    end
+    return df
+end
+
 const TBL_SMALL = mixed_table(2_000)
 const TBL_MED   = mixed_table(20_000)
 const TBL_WIDE  = wide_table(20_000)   # unused pending the NaN bug above
+const TBL_HICARD = hicard_table(20_000)
 const SYN_MED   = mixed_table(20_000; seed = 99)
 
 const BUDGET = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
@@ -189,6 +212,20 @@ function build_cases()
     end
     push!(cs, Case("dpcopula/fit", "engines",
         () -> fit(DPCopulaGenerator(), TBL_MED; privacy = BUDGET, rng = RNG()), reps = 3))
+
+    # High-cardinality categoricals: MST's cost is quadratic in level count,
+    # and no other case here has a column wider than 42 levels. Domain
+    # compression runs before tree selection and shrinks the domains it scores
+    # over, which is the only reason this case is cheap enough to keep in a
+    # routine suite - measured at 5.81s per fit with compression off against
+    # 0.18s with it on. A regression here is therefore as likely to mean
+    # compression stopped firing as that something got slower.
+    push!(cs, Case("mst/fit_hicard", "engines",
+        () -> fit(MSTGenerator(), TBL_HICARD; privacy = BUDGET, rng = RNG()), reps = 3))
+    let m = fit(MSTGenerator(), TBL_HICARD; privacy = BUDGET, rng = RNG())
+        push!(cs, Case("mst/sample_hicard_20k", "engines",
+            () -> sample(m, 20_000; rng = RNG()), reps = 3))
+    end
 
     # Diffusion. Epoch counts are deliberately small — this tracks cost per
     # unit of work, not convergence.
