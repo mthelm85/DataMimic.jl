@@ -286,10 +286,40 @@ which governs extension loading rather than dispatch, remains in force.
 >
 > See `benchmark/eval_compress.jl`, which runs this comparison.
 >
-> The budget split is 30% selection / 20% 1-way / 50% 2-way, against the
-> reference's ⅓ / ⅓ / ⅓.  The 1-way marginals serve mainly to anchor the
-> selection score, so they take the smaller share; both are valid zCDP
-> compositions.
+> **Budget split: 30% selection / 20% 1-way / 50% 2-way**, against the
+> reference's ⅓ / ⅓ / ⅓.  Both are valid zCDP compositions and the (ε, δ)
+> guarantee holds either way; this is an accuracy question, not a privacy one.
+>
+> The 1-way share is smallest on the reasoning that budget is worth more in the
+> 2-way marginals that become the sampling conditionals.  That reasoning was
+> once recorded as "the 1-way marginals serve only as the independence
+> reference for the selection score", which is not accurate.  `oneway_noisy`
+> has four consumers:
+>
+> 1. the independence reference in `_edge_scores`;
+> 2. the `3σ` threshold deciding which bins domain compression merges;
+> 3. `y_node`, the node potentials Private-PGM reconciles against — whose
+>    fitted root becomes the marginal every sampled row starts from (REQ-MST-005
+>    says as much: the MRF is fitted to *every* 1-way marginal);
+> 4. the root marginal directly, on the unreconciled path.
+>
+> Consumer 3 predates domain compression, so the "anchor only" description was
+> already wrong before compression existed.  Consumer 2 arrived with it.
+>
+> **The interaction worth testing.**  σ scales as `1/√ρ`, so a 20% share
+> rather than ⅓ makes σ about 1.29× larger and the merge threshold about 29%
+> higher.  DataMimic therefore compresses *more aggressively than the reference
+> does* at the same total ε — as a side effect of a budget decision taken for
+> unrelated reasons.  That is consistent with the one measured cost case:
+> Bach's 102-level column still collapses to 29 bins at ε = 4, and Bach is the
+> table where compression loses about 5%.
+>
+> **Untested, and not cheap to test.**  Changing the split moves MST
+> independently of compression, so attribution needs a split × compression
+> factorial across ε and seeds; and the current split has its own evidence
+> behind it (the TSTR ratio below rising with ε where it had been flat), which
+> would have to be re-measured on Adult with TSTR.  Recorded here as the
+> obvious next investigation rather than a defect.
 >
 > **Fixed — selection used to be effectively random.**  The exponential
 > mechanism weights candidates by `exp(ε·q/(2Δ))`, so its ability to

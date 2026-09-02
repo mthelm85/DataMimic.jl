@@ -651,13 +651,29 @@ function _fit_engine(::MSTGenerator, cols, col_names, id_set, fill_dict,
 
     # ── Budget allocation (zCDP) ────────────────────────────────────────
     #
-    # Three ways, as in [McKenna et al. 2021]: selection, the 1-way marginals
-    # that anchor the selection score, and the 2-way marginals on the chosen
-    # edges.  zCDP composes additively across all of them.
-    # The 1-way marginals serve only as the independence reference for the
-    # selection score, so they are given a small share: a coarse reference is
-    # enough to rank candidate edges, and the budget is far more valuable in
-    # the 2-way marginals that become the sampling conditionals.
+    # Three ways, as in [McKenna et al. 2021]: selection, the 1-way marginals,
+    # and the 2-way marginals on the chosen edges.  zCDP composes additively
+    # across all of them.
+    #
+    # The 1-way share is the smallest on the reasoning that budget is worth
+    # more in the 2-way marginals, which become the sampling conditionals.
+    # Note what that share actually buys, though, because it is more than the
+    # word "anchor" suggests -- `oneway_noisy` has four consumers:
+    #
+    #   1. the independence reference in `_edge_scores`,
+    #   2. the `3 sigma` threshold deciding which bins domain compression
+    #      merges,
+    #   3. `y_node`, the node potentials Private-PGM reconciles against, whose
+    #      fitted root becomes the marginal every sampled row starts from,
+    #   4. the root marginal directly, on the unreconciled path.
+    #
+    # Consumer 2 in particular interacts with this split. Sigma scales as
+    # 1/sqrt(rho), so 20% rather than the reference's 1/3 makes sigma about
+    # 1.29x larger and the merge threshold about 29% higher: DataMimic
+    # compresses more aggressively than [McKenna et al. 2021] does at the same
+    # total epsilon, as a side effect of a budget decision made for unrelated
+    # reasons. Whether a different split would reduce that is untested -- see
+    # the MST implementation note in REQUIREMENTS.md.
     rho_total   = _eps_delta_to_rho(privacy.epsilon, privacy.delta)
     rho_select  = 0.30 * rho_total
     rho_oneway  = 0.20 * rho_total
