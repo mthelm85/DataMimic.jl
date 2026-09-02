@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Engines — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=8de99f5b">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=9779497b">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -159,7 +159,8 @@ model = fit(gen, df)</code></pre>
 <p>Reconciliation is pure post-processing — it touches only already-private measurements — so it costs no budget. It matters most at tight budgets, where measurement noise dominates and the inconsistencies are large; by around ε = 4 it makes little practical difference.</p>
 <p><strong>Budget split.</strong> 30% to tree selection, 20% to the one-way marginals, 50% to the selected two-way marginals, composed under zCDP.</p>
 <p><strong>Where it fits.</strong> Because everything is discretized, MST is at its best on categorical or naturally discrete data and loses information on continuous columns through binning. It also benefits more than the public engines from extra rows at fixed ε.</p>
-<p><strong>Gaps.</strong> Domain compression — merging low-count bins before selection — is the one part of the published algorithm not implemented.</p>
+<p><strong>Domain compression.</strong> Before selecting the tree, bins whose noisy count falls below 3σ are folded into a single &quot;other&quot; category per column, and the fitted distribution is spread back over them uniformly at the end. The merge reads only the noisy counts already released in step 2, so it is post-processing and costs no privacy budget.</p>
+<p>This helps because a sparse level carries less signal than the noise added to it: merging trades resolution you could not measure for a count you can. It is not free, though — redistributing uniformly is a biased estimate of a skewed tail, and that only pays while noise dominates. Measured across a synthetic cardinality sweep and four real tables, it was better or neutral on three of them and cost about 5% on one whose columns were mostly binary, and whose marginals were therefore already well measured. See <code class="md-code-inline">benchmark/eval_compress.jl</code>.</p>
 <p><strong>Marginal order is not a setting.</strong> MST <em>is</em> the spanning tree over 2-way marginals; the tree is exactly what makes the belief propagation in step 5 exact. Three-way marginals would need junction-tree inference, and at a fixed budget they are usually a bad trade: with the default 32 bins a 2-way marginal has 1,024 cells against a 3-way marginal&#39;s 32,768, while the noise added per cell is the same, so the signal per cell drops by a factor of 32. The published mechanism that chooses higher-order marginals adaptively is AIM (McKenna et al.</p>
 <ol class="md-list-tight">
 <li><p>— a different algorithm, not a flag on this one.</p>
@@ -203,6 +204,6 @@ model = fit(gen, df)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=8de99f5b"></script>
+  <script src="../assets/materialdocs.js?v=9779497b"></script>
 </body>
 </html>
