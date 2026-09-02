@@ -181,7 +181,7 @@ end
 
 const TBL_SMALL = mixed_table(2_000)
 const TBL_MED   = mixed_table(20_000)
-const TBL_WIDE  = wide_table(20_000)   # unused pending the NaN bug above
+const TBL_WIDE  = wide_table(20_000)   # 9 categorical blocks
 const TBL_HICARD = hicard_table(20_000)
 const SYN_MED   = mixed_table(20_000; seed = 99)
 
@@ -230,11 +230,19 @@ function build_cases()
     # Diffusion. Epoch counts are deliberately small — this tracks cost per
     # unit of work, not convergence.
     #
-    # TBL_MED rather than TBL_WIDE: a table of 9 independent uniformly-random
-    # categoricals drives training to a NaN loss at epoch 1 regardless of
-    # batch size or learning rate. That is a real open bug, not a property of
-    # this harness, and it is tracked separately — a benchmark should measure
-    # a path that works rather than encode a crash.
+    # TBL_WIDE used to be excluded here: 9 independent uniformly-random
+    # categoricals drove training to a NaN loss at epoch 1, and the comment
+    # in its place called that an open bug. It is not open. The cause was
+    # `_block_log_normalize` subtracting a single GLOBAL maximum from raw
+    # logits, so a block far below that maximum underflowed to zero and every
+    # downstream KL became NaN — which needs several blocks and a wide batch
+    # to show, exactly this table. Fixed with a per-block maximum, and
+    # regression-tested under "block log-softmax stability".
+    #
+    # Re-verified before enabling: 3 epochs at (batch 4096, lr 1e-3),
+    # (512, 1e-3) and (4096, 1e-2) all train to finite decreasing losses and
+    # sample finite output. The wide case is kept below as the suite's only
+    # diffusion coverage of many categorical blocks.
     let g = DiffusionGenerator(; epochs = 3, batch_size = 4096,
                                d_layers = [256, 1024, 1024, 256], num_timesteps = 100)
         push!(cs, Case("diffusion/fit_3ep", "diffusion",
@@ -245,6 +253,14 @@ function build_cases()
                 TBL_MED; rng = RNG())
         push!(cs, Case("diffusion/sample_10k", "diffusion",
             () -> sample(m, 10_000; rng = RNG()), reps = 3))
+    end
+
+    # Many categorical blocks rather than a bigger network: a deliberately
+    # small MLP, so what moves here is the per-block multinomial machinery.
+    let g = DiffusionGenerator(; epochs = 3, batch_size = 4096,
+                               d_layers = [256, 256], num_timesteps = 100)
+        push!(cs, Case("diffusion/fit_wide_3ep", "diffusion",
+            () -> fit(g, TBL_WIDE; rng = RNG()), reps = 3))
     end
 
     # DP-SGD used to be gated behind --slow, at ~300x the cost of standard
