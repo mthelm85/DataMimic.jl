@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Engines — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=457eeaa5">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=8de99f5b">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -159,7 +159,12 @@ model = fit(gen, df)</code></pre>
 <p>Reconciliation is pure post-processing — it touches only already-private measurements — so it costs no budget. It matters most at tight budgets, where measurement noise dominates and the inconsistencies are large; by around ε = 4 it makes little practical difference.</p>
 <p><strong>Budget split.</strong> 30% to tree selection, 20% to the one-way marginals, 50% to the selected two-way marginals, composed under zCDP.</p>
 <p><strong>Where it fits.</strong> Because everything is discretized, MST is at its best on categorical or naturally discrete data and loses information on continuous columns through binning. It also benefits more than the public engines from extra rows at fixed ε.</p>
-<p><strong>Gaps.</strong> Domain compression — merging low-count bins before selection — is the one part of the published algorithm not implemented. <code class="md-code-inline">max_marginal_order = 3</code> is accepted but warns and falls back to 2-way marginals.</p>
+<p><strong>Gaps.</strong> Domain compression — merging low-count bins before selection — is the one part of the published algorithm not implemented.</p>
+<p><strong>Marginal order is not a setting.</strong> MST <em>is</em> the spanning tree over 2-way marginals; the tree is exactly what makes the belief propagation in step 5 exact. Three-way marginals would need junction-tree inference, and at a fixed budget they are usually a bad trade: with the default 32 bins a 2-way marginal has 1,024 cells against a 3-way marginal&#39;s 32,768, while the noise added per cell is the same, so the signal per cell drops by a factor of 32. The published mechanism that chooses higher-order marginals adaptively is AIM (McKenna et al.</p>
+<ol class="md-list-tight">
+<li><p>— a different algorithm, not a flag on this one.</p>
+</li>
+</ol>
 <p><strong>References.</strong> McKenna, Miklau &amp; Sheldon, <em>Winning the NIST Contest</em> (JPC 11(3), 2021); McKenna, Sheldon &amp; Miklau, <em>Graphical-model based estimation and inference for differential privacy</em> (ICML 2019). Cross-checked against <a href="https://github.com/ryan112358/private-pgm">ryan112358/private-pgm</a>.</p>
 <hr class="md-hr">
 <h2 id="DPCopulaGenerator" class="md-heading">DPCopulaGenerator<a href="#DPCopulaGenerator" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
@@ -198,6 +203,6 @@ model = fit(gen, df)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=457eeaa5"></script>
+  <script src="../assets/materialdocs.js?v=8de99f5b"></script>
 </body>
 </html>
