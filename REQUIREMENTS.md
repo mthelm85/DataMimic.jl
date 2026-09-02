@@ -56,7 +56,7 @@ verified against the source.
 | **REQ-TYP-005** | `CopulaGenerator` shall accept a `copula_type::Symbol` parameter (`:beta` or `:gaussian`), defaulting to `:beta`. | Must | Done | 1 |
 | **REQ-TYP-006** | IF `CopulaGenerator` is constructed with a `copula_type` other than `:beta` or `:gaussian`, THEN the constructor shall throw `ArgumentError`. | Must | Done | 1 |
 | **REQ-TYP-007** | `AutoGenerator` shall subtype `AbstractGenerator` and carry no configuration fields. | Must | Removed | 1 |
-| **REQ-TYP-008** | `MSTGenerator` shall subtype `AbstractPrivateGenerator` and accept `max_marginal_order::Int` (default `2`). | Must | Done | 2 |
+| **REQ-TYP-008** | `MSTGenerator` shall subtype `AbstractPrivateGenerator` and take no configuration — marginal order is fixed by the algorithm, not chosen by the caller (see REQ-MST-007). | Must | Done | 2 |
 | **REQ-TYP-009** | `DPCopulaGenerator` shall subtype `AbstractPrivateGenerator` with no configuration fields. | Must | Done | 2 |
 | **REQ-TYP-010** | `DiffusionGenerator` shall subtype `AbstractGenerator` (not Public or Private) and accept `dp::Bool`, `epochs::Int`, `batch_size::Int`, `hidden_dim::Int`, `n_blocks::Int`, `embed_dim::Int`, `dropout::Float64`, `lr::Float64`, `lr_warmup::Int`. | Must | Done | 3 |
 | **REQ-TYP-011** | `ColumnHint` shall accept `name::Symbol`, `kind::Symbol`, and optional `levels::Vector`. | Must | Done | 1 |
@@ -215,7 +215,9 @@ which governs extension loading rather than dispatch, remains in force.
 | **REQ-MST-004** | `MSTGenerator` shall construct a spanning tree over columns and store it as parent→child edges. | Must | Done | 2 |
 | **REQ-MST-005** | `MSTGenerator` shall estimate the joint distribution by fitting a tree-structured Markov random field to all noisy measurements — every 1-way marginal and the selected 2-way marginals — via entropic mirror descent with exact sum-product belief propagation \[McKenna et al. 2019\], then sample ancestrally from the reconciled conditionals. Estimation is post-processing and consumes no privacy budget. | Must | Done | 2 |
 | **REQ-MST-006** | `MSTGenerator` shall un-discretize continuous columns when sampling synthetic rows. | Must | Done | 2 |
-| **REQ-MST-007** | `MSTGenerator` shall accept `max_marginal_order ∈ {2, 3}`; 3-way marginals are **not implemented** and fall back to 2-way with a warning. | Must | Partial | 2 |
+| **REQ-MST-007** | ~~`MSTGenerator` shall accept `max_marginal_order ∈ {2, 3}`.~~ Withdrawn: marginal order is not a property of MST. The spanning tree over 2-way marginals is what makes belief propagation exact, and 3-way marginals need junction-tree inference plus a different budget argument — that is AIM \[McKenna et al. 2022\], a separate mechanism. `MSTGenerator` now takes no argument. | Must | Removed | 2 |
+
+### MST implementation note
 
 > **Relationship to \[McKenna et al. 2021\].**  Checked against the reference
 > implementation (`ryan112358/private-pgm`, `mechanisms/mst.py`).  All *d* 1-way
@@ -371,7 +373,7 @@ Issues discovered during requirements extraction from `PACKAGE_SPEC.md`.
 | ~~**GAP-006**~~ | **All columns are identifiers.** | ✅ Fixed — added to §9 error table: `ArgumentError("No statistical columns remain after excluding identifiers.")`. Covered by REQ-FIT-011. |
 | ~~**GAP-007**~~ | **`copula_type` validation.** | ✅ Fixed — inner constructor added to `CopulaGenerator`; added to §9 error table. Covered by REQ-TYP-006. |
 | ~~**GAP-008**~~ | **`DiffusionGenerator` parameter bounds.** | ✅ Fixed — inner constructor validates `epochs > 0`, `batch_size > 0`; added to §9 error table. |
-| ~~**GAP-009**~~ | **`MSTGenerator` `max_marginal_order` bounds.** | ✅ Fixed — inner constructor validates `∈ {2, 3}`; added to §9 error table. |
+| ~~**GAP-009**~~ | **`MSTGenerator` `max_marginal_order` bounds.** | ✅ Fixed — inner constructor validated `∈ {2, 3}`. **Later superseded**: the parameter itself was withdrawn (REQ-MST-007), so there are no bounds left to check. |
 | ~~**GAP-010**~~ | **`ColumnHint.levels` does not cover all observed values.** | ✅ Fixed — added to §9 error table: `@warn` listing uncovered values. Covered by REQ-FIT-013. |
 | ~~**GAP-012**~~ | **Phase 1 `AutoGenerator` with `D > 30` and no privacy.** | ✅ Fixed — Phase 1 `AutoGenerator` always resolves to `CopulaGenerator(:beta)` regardless of `D`/`N`; added `ErrorException` for the `DiffusionGenerator` path. Covered by REQ-AUT-009. |
 
@@ -392,12 +394,13 @@ Counted from the rows above.
 | MoSCoW | Count |     | Status | Count |
 |--------|-------|-----|--------|-------|
 | **Must** | 129 |   | **Done** | 130 |
-| **Should** | 11 |  | **Partial** | 1 |
-| **Could** | 2 |    | **Removed** | 11 |
+| **Should** | 11 |  | **Partial** | 0 |
+| **Could** | 2 |    | **Removed** | 12 |
 | **Total** | 142 |  | **Total** | 142 |
 
-The single *Partial* is REQ-MST-007 (3-way marginals). The 11 *Removed* rows
-are the withdrawn `AutoGenerator` dispatch (§9) plus its type and `fit`
-requirements, REQ-TYP-007 and REQ-FIT-010.
+No rows are *Partial*. The 12 *Removed* rows are the withdrawn
+`AutoGenerator` dispatch (§9) plus its type and `fit` requirements,
+REQ-TYP-007 and REQ-FIT-010, and REQ-MST-007, whose premise was wrong rather
+than unimplemented.
 
 **Gaps found**: 14 (11 resolved, 3 open design decisions).

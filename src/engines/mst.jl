@@ -429,12 +429,8 @@ end
 
 # ─── _fit_engine(::MSTGenerator, …) ─────────────────────────────────────
 
-function _fit_engine(gen::MSTGenerator, cols, col_names, id_set, fill_dict,
+function _fit_engine(::MSTGenerator, cols, col_names, id_set, fill_dict,
                      hints, nm_cache, basetype_cache, nrows, mat, rng, privacy)
-    if gen.max_marginal_order == 3
-        @warn "3-way marginals are not yet implemented; falling back to 2-way."
-    end
-
     hint_dict  = Dict(h.name => h for h in hints)
     col_kinds  = Symbol[]
     miss       = Dict{Symbol, Float64}()

@@ -129,22 +129,17 @@ CopulaGenerator() = CopulaGenerator(:beta)
     MSTGenerator
 
 Private synthetic data via the MST (McKenna et al., 2021) algorithm:
-select low-error 2-way marginals using the exponential mechanism, build a
-junction tree, and reconstruct a full joint distribution with calibrated
-Gaussian noise.
+select low-error 2-way marginals using the exponential mechanism, forming a
+spanning tree over columns, and reconstruct a full joint distribution from
+measurements taken under calibrated Gaussian noise.
 
 Replaces the earlier "GraphicalDPGenerator" name to cite the actual algorithm.
-"""
-struct MSTGenerator <: AbstractPrivateGenerator
-    max_marginal_order::Int   # 2 for 2-way, 3 for 3-way (default 2)
 
-    function MSTGenerator(max_marginal_order::Int)
-        max_marginal_order in (2, 3) ||
-            throw(ArgumentError("max_marginal_order must be 2 or 3, got $max_marginal_order"))
-        new(max_marginal_order)
-    end
-end
-MSTGenerator() = MSTGenerator(2)
+Takes no argument: marginal order is not a property of MST. The spanning tree
+is what makes belief propagation exact, so 3-way marginals would mean
+junction-tree inference and a different mechanism (AIM, McKenna et al. 2022).
+"""
+struct MSTGenerator <: AbstractPrivateGenerator end
 
 """
     DPCopulaGenerator
@@ -640,7 +635,6 @@ DataMimic/
 | `identifiers` names a column not in the table | `ArgumentError` |
 | `fill` key is not in resolved identifier set | `ArgumentError("fill key :foo is not an identifier column")` |
 | `CopulaGenerator(copula_type)` with invalid symbol | `ArgumentError("copula_type must be :beta or :gaussian, got :foo")` |
-| `MSTGenerator(order)` with `order ∉ {2, 3}` | `ArgumentError("max_marginal_order must be 2 or 3, got 5")` |
 | `DiffusionGenerator(epochs=0)` or `batch_size=0` | `ArgumentError("epochs must be positive")` |
 | `AbstractPublicGenerator` + `PrivacyBudget` | `ArgumentError("CopulaGenerator does not support privacy; use a private generator or remove the privacy budget.")` |
 | `AbstractPrivateGenerator` + `privacy === nothing` | `ArgumentError("MSTGenerator requires a PrivacyBudget.")` |

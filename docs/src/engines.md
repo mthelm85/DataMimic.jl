@@ -214,8 +214,16 @@ columns through binning. It also benefits more than the public engines from
 extra rows at fixed ε.
 
 **Gaps.** Domain compression — merging low-count bins before selection — is the
-one part of the published algorithm not implemented. `max_marginal_order = 3`
-is accepted but warns and falls back to 2-way marginals.
+one part of the published algorithm not implemented.
+
+**Marginal order is not a setting.** MST *is* the spanning tree over 2-way
+marginals; the tree is exactly what makes the belief propagation in step 5
+exact. Three-way marginals would need junction-tree inference, and at a fixed
+budget they are usually a bad trade: with the default 32 bins a 2-way marginal
+has 1,024 cells against a 3-way marginal's 32,768, while the noise added per
+cell is the same, so the signal per cell drops by a factor of 32. The published
+mechanism that chooses higher-order marginals adaptively is AIM (McKenna et al.
+2022) — a different algorithm, not a flag on this one.
 
 **References.** McKenna, Miklau & Sheldon, *Winning the NIST Contest* (JPC
 11(3), 2021); McKenna, Sheldon & Miklau, *Graphical-model based estimation and

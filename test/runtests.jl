@@ -50,9 +50,13 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         end
 
         @testset "MSTGenerator" begin
-            @test MSTGenerator().max_marginal_order == 2
-            @test MSTGenerator(3).max_marginal_order == 3
-            @test_throws ArgumentError MSTGenerator(5)
+            # Marginal order is not a parameter: MST is the 2-way spanning tree.
+            # The type carries no fields, so there is nothing to configure and
+            # nothing to get wrong.
+            @test MSTGenerator() isa DataMimic.AbstractPrivateGenerator
+            @test fieldcount(MSTGenerator) == 0
+            @test_throws MethodError MSTGenerator(2)
+            @test_throws MethodError MSTGenerator(3)
         end
 
         @testset "DiffusionGenerator" begin
@@ -631,13 +635,6 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
             @test :id in Symbol.(names(syn))
             @test syn.id[1] == "id_1"
             @test !(:id in model.stat_columns)
-        end
-
-        @testset "3-way marginals warn and fallback" begin
-            model = @test_logs (:warn, r"3-way") fit(
-                MSTGenerator(3), tbl;
-                privacy = pb, rng = MersenneTwister(42))
-            @test model isa FittedMSTModel
         end
 
         # REQ-MST-005: belief propagation on the selected tree must be exact.

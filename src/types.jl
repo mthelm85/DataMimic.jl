@@ -45,7 +45,7 @@ end
 CopulaGenerator() = CopulaGenerator(:beta)
 
 """
-    MSTGenerator(max_marginal_order::Int=2)
+    MSTGenerator()
 
 Private synthetic data via MST (McKenna et al. 2021): measure all 1-way
 marginals → select a spanning tree with the exponential mechanism → measure the
@@ -54,23 +54,18 @@ selected 2-way marginals → reconcile every measurement with Private-PGM
 Satisfies (ε,δ)-DP via zCDP composition; the reconciliation step is
 post-processing and costs no budget.
 
+Marginal order is not a parameter. MST *is* the spanning tree over 2-way
+marginals: the tree is what makes belief propagation exact, and 3-way marginals
+would need junction-tree inference and a different budget argument. The
+published mechanism for adaptively chosen higher-order marginals is AIM
+(McKenna et al. 2022), which is a different algorithm rather than a setting on
+this one.
+
 Domain compression (merging low-count bins before selection) is the one part of
-the published algorithm not implemented; see the note under REQ-MST-007 in
+the published algorithm not implemented; see the MST implementation note in
 REQUIREMENTS.md.
-
-`max_marginal_order = 3` is accepted but not implemented — it warns and falls
-back to 2-way marginals.
 """
-struct MSTGenerator <: AbstractPrivateGenerator
-    max_marginal_order::Int
-
-    function MSTGenerator(max_marginal_order::Int)
-        max_marginal_order in (2, 3) ||
-            throw(ArgumentError("max_marginal_order must be 2 or 3, got $max_marginal_order"))
-        new(max_marginal_order)
-    end
-end
-MSTGenerator() = MSTGenerator(2)
+struct MSTGenerator <: AbstractPrivateGenerator end
 
 """
     DPCopulaGenerator()

@@ -148,7 +148,7 @@ Papers and methods underpinning each engine and evaluation module.
   Cross-checked against the reference implementation at
   [ryan112358/private-pgm](https://github.com/ryan112358/private-pgm)
   (`mechanisms/mst.py`). Domain compression is the one remaining gap; see the
-  note under REQ-MST-007 in REQUIREMENTS.md.
+  MST implementation note in REQUIREMENTS.md §11.
 
 ### Private Graphical Models
 
@@ -162,6 +162,23 @@ Papers and methods underpinning each engine and evaluation module.
   with exact sum-product belief propagation for the inference step — the model
   is a spanning tree, so two passes suffice and no general junction-tree
   machinery is required.
+
+### Higher-Order Marginals (AIM) — *not implemented*
+
+- **McKenna, R., Mullins, B., Sheldon, D., & Miklau, G. (2022).**
+  *AIM: An Adaptive and Iterative Mechanism for Differentially Private
+  Synthetic Data.*
+  PVLDB 15(11): 2599–2612.
+  [arXiv:2201.12677](https://arxiv.org/abs/2201.12677)
+
+  The successor to MST, and the reason `MSTGenerator` has no marginal-order
+  setting. MST fixes the structure to a spanning tree over 2-way marginals;
+  AIM selects marginals of varying order adaptively, budgeting each round
+  against how much the measurement is expected to help. Higher-order marginals
+  are not a parameter you can turn on in MST — the tree is what makes belief
+  propagation exact, and abandoning it means junction-tree inference and a
+  different budget argument. **Not implemented**; listed as the published route
+  to higher-order structure, not as a description of current behaviour.
 
 ---
 
