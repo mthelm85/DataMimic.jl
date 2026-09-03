@@ -10,13 +10,23 @@ abstract type AbstractFittedModel end
 
 """
     PrivacyBudget(; epsilon, delta=1e-5)
+    PrivacyBudget(; ε, δ=1e-5)
 
 Differential privacy parameters used by private generators
 (`MSTGenerator`, `DPCopulaGenerator`, `DiffusionGenerator(dp=true)`).
+
+`ε`/`δ` are accepted as aliases for `epsilon`/`delta`, and both spellings read
+back off the resulting budget. Passing both spellings of the same parameter is
+an error rather than a silent precedence rule.
+
+```julia
+PrivacyBudget(epsilon = 1.0, delta = 1e-5)
+PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical
+```
 """
-Base.@kwdef struct PrivacyBudget
+struct PrivacyBudget
     epsilon::Float64
-    delta::Float64 = 1e-5
+    delta::Float64
 
     function PrivacyBudget(epsilon, delta)
         epsilon > 0   || throw(ArgumentError("ε must be positive, got $epsilon"))
@@ -24,6 +34,32 @@ Base.@kwdef struct PrivacyBudget
         new(Float64(epsilon), Float64(delta))
     end
 end
+
+"""Take whichever spelling was supplied, and refuse both at once."""
+function _one_spelling(long, short, long_name::String, short_name::String)
+    long === nothing && return short
+    short === nothing && return long
+    throw(ArgumentError("pass $long_name or $short_name, not both"))
+end
+
+function PrivacyBudget(; epsilon = nothing, delta = nothing,
+                         ε = nothing, δ = nothing)
+    e = _one_spelling(epsilon, ε, "epsilon", "ε")
+    d = _one_spelling(delta, δ, "delta", "δ")
+    e === nothing &&
+        throw(ArgumentError("PrivacyBudget requires epsilon (or ε)"))
+    return PrivacyBudget(e, something(d, 1e-5))
+end
+
+# The struct stores `epsilon`/`delta`, but a budget built with ε/δ should read
+# back the same way, so both spellings resolve on access too.
+function Base.getproperty(b::PrivacyBudget, name::Symbol)
+    name === :ε && return getfield(b, :epsilon)
+    name === :δ && return getfield(b, :delta)
+    return getfield(b, name)
+end
+
+Base.propertynames(::PrivacyBudget) = (:epsilon, :delta, :ε, :δ)
 
 # ─── Generator Configs ───────────────────────────────────────────────────────
 

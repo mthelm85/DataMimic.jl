@@ -326,6 +326,35 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
     # ════════════════════════════════════════════════════════════════════════
     # Privacy validation
     # ════════════════════════════════════════════════════════════════════════
+    @testset "PrivacyBudget accepts ε/δ" begin
+        # Greek spellings are aliases, not a second parameterization.
+        @test PrivacyBudget(ε = 1.0, δ = 1e-5) == PrivacyBudget(epsilon = 1.0, delta = 1e-5)
+        @test PrivacyBudget(ε = 1.0).delta == 1e-5          # same δ default
+        @test PrivacyBudget(ε = 2.0).epsilon == 2.0
+
+        # Either spelling reads back, whichever was used to build it.
+        b = PrivacyBudget(ε = 1.5, δ = 1e-6)
+        @test b.epsilon == b.ε == 1.5
+        @test b.delta == b.δ == 1e-6
+        @test Set(propertynames(b)) == Set((:epsilon, :delta, :ε, :δ))
+
+        # Supplying both spellings is a mistake, not a precedence puzzle.
+        @test_throws ArgumentError PrivacyBudget(epsilon = 1.0, ε = 2.0)
+        @test_throws ArgumentError PrivacyBudget(ε = 1.0, delta = 1e-5, δ = 1e-6)
+        @test_throws ArgumentError PrivacyBudget(δ = 1e-5)   # no epsilon at all
+
+        # Validation still applies through the alias path.
+        @test_throws ArgumentError PrivacyBudget(ε = -1.0)
+        @test_throws ArgumentError PrivacyBudget(ε = 1.0, δ = 2.0)
+
+        # And a budget built either way still drives a private fit.
+        df = DataFrame(a = randn(MersenneTwister(1), 300),
+                       b = rand(MersenneTwister(2), ["x", "y", "z"], 300))
+        m = fit(MSTGenerator(), df; privacy = PrivacyBudget(ε = 1.0),
+                rng = MersenneTwister(3))
+        @test nrow(sample(m, 50; rng = MersenneTwister(4))) == 50
+    end
+
     @testset "privacy validation" begin
         df = make_df()
         pb = PrivacyBudget(epsilon = 1.0)
@@ -1686,6 +1715,43 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
                 @test only(res).ok
                 @test isfinite(only(res).mean)
             end
+
+            @testset "curried metric needs no anonymous function" begin
+                # utility_tstr takes a target column, so it does not fit
+                # compare's f(real, synth) shape on its own. The partially
+                # applied form supplies it without a wrapper lambda.
+                f = utility_tstr(:c)
+                @test f isa Function
+
+                res = compare([CopulaGenerator()], cdf;
+                              metrics = (utility = f,),
+                              n_seeds = 2, rng = MersenneTwister(11))
+                @test only(res).ok
+                @test isfinite(only(res).mean)
+
+                # Currying must produce exactly what the direct call
+                # produces. Compare them directly rather than through
+                # `compare`: utility_tstr splits train/test at random, and
+                # `compare` does not thread its rng into metric functions, so
+                # routing this through `compare` would be testing that instead.
+                #
+                # Note also that the closure captures ONE rng and advances it
+                # on every call, so a curried metric with a fixed rng does not
+                # give every seed the same split. That is why each side here
+                # builds its own generator and is called once.
+                syn1 = sample(fit(CopulaGenerator(), cdf; rng = MersenneTwister(21)),
+                              nrow(cdf); rng = MersenneTwister(22))
+                direct  = utility_tstr(cdf, syn1, :c; rng = MersenneTwister(99))
+                curried = utility_tstr(:c; rng = MersenneTwister(99))(cdf, syn1)
+                @test direct.ratio ≈ curried.ratio
+                @test direct.synth_score ≈ curried.synth_score
+
+                # Keywords are forwarded to the underlying call.
+                g = utility_tstr(:c; nrounds = 20)
+                @test g(cdf, cdf) isa NamedTuple
+                @test hasproperty(g(cdf, cdf), :ratio)
+            end
+
 
             @testset "invalid input" begin
                 @test_throws ArgumentError compare([], cdf)

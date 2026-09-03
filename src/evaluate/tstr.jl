@@ -289,3 +289,33 @@ function utility_tstr(real, synth, target::Symbol;
         )
     end
 end
+
+"""
+    utility_tstr(target::Symbol; kwargs...) -> Function
+
+Partially applied form, for `compare`.
+
+`compare` calls each metric as `f(real, synth)`, so a metric needing more than
+those two arguments would otherwise have to be wrapped in an anonymous
+function. This returns that wrapper:
+
+```julia
+compare(generators, df;
+        metrics = (fidelity = fidelity_score,
+                   utility  = utility_tstr(:income)))
+```
+
+Keywords are forwarded, so `utility_tstr(:income; nrounds = 100)` works too.
+The result is a `NamedTuple`, and `compare` reads `.ratio` from it without
+being told to - see `metric_field`.
+
+!!! note "Passing `rng` here captures one generator"
+    The returned closure holds whatever `rng` you give it and advances it on
+    every call, so `utility_tstr(:income; rng = MersenneTwister(1))` does not
+    give each of `compare`'s seeds the same train/test split - it gives them
+    successive draws from one stream. That is usually what you want. To fix
+    the split across every call, build a fresh generator inside a lambda
+    instead: `(r, s) -> utility_tstr(r, s, :income; rng = MersenneTwister(1))`.
+"""
+utility_tstr(target::Symbol; kwargs...) =
+    (real, synth) -> utility_tstr(real, synth, target; kwargs...)
