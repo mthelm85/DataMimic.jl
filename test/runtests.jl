@@ -1773,6 +1773,35 @@ DataMimic.privacy_budget(::BoomGenerator) = nothing
             end
 
 
+            @testset "reproducible with a stochastic metric" begin
+                # compare documents that seeds derive from `rng`, but it only
+                # ever seeded fit and sample. Metrics are called as
+                # f(real, synth) with nowhere to pass an rng, and utility_tstr
+                # splits train/test at random, so two identically seeded runs
+                # disagreed - the documented guarantee was false. Found by an
+                # equivalence test that had no business failing.
+                m = (fidelity = fidelity_score, utility = utility_tstr(:c))
+                a = compare([CopulaGenerator()], cdf; metrics = m,
+                            n_seeds = 3, rng = MersenneTwister(31))
+                b = compare([CopulaGenerator()], cdf; metrics = m,
+                            n_seeds = 3, rng = MersenneTwister(31))
+                @test [r.mean for r in a] == [r.mean for r in b]
+                @test [r.sd for r in a] == [r.sd for r in b]
+
+                # A different seed must still give a different answer, or the
+                # fix would have pinned the metric rather than seeded it.
+                c = compare([CopulaGenerator()], cdf; metrics = m,
+                            n_seeds = 3, rng = MersenneTwister(32))
+                @test [r.mean for r in a] != [r.mean for r in c]
+
+                # And compare must not disturb the caller's own stream.
+                Random.seed!(1234); x = rand()
+                compare([CopulaGenerator()], cdf; metrics = m,
+                        n_seeds = 2, rng = MersenneTwister(31))
+                Random.seed!(1234); y = rand()
+                @test x == y
+            end
+
             @testset "invalid input" begin
                 @test_throws ArgumentError compare([], cdf)
                 @test_throws ArgumentError compare([CopulaGenerator()], cdf;

@@ -46,7 +46,9 @@ it to `DataFrame` to sort or pivot.
   Public generators are
   fitted without one, so a mixed list works in a single call.
 - `hints`, `identifiers`, `fill`: forwarded to `fit`.
-- `rng`: seeds derive from this, so a run is reproducible.
+- `rng`: seeds derive from this, so a run is reproducible — including
+  metrics that are themselves stochastic, whose randomness is seeded around
+  each call rather than left to the global stream.
 
 # Failure handling
 A generator that fails on every seed is reported with `ok = false` and its
@@ -118,8 +120,27 @@ function compare(generators, table;
                 synth = DataMimic.sample(model, n_out;
                             rng = Random.MersenneTwister(base + seed + 10^6))
                 push!(times, elapsed)
-                for (name, f) in pairs(metrics)
-                    push!(scores[name], _metric_value(f(table, synth), metric_field))
+
+                # Metrics are called as `f(real, synth)` - there is nowhere to
+                # pass an rng - but some are stochastic: `utility_tstr` splits
+                # train/test at random. Seeding fit and sample alone therefore
+                # did NOT make a run reproducible, contradicting the promise
+                # above. Seed the task-local RNG around the call instead,
+                # which works for user-supplied metrics too, and restore it so
+                # `compare` does not leave the caller's stream disturbed.
+                #
+                # The seed is the same for every generator at a given `seed`,
+                # so comparisons stay paired, and differs across seeds so the
+                # reported sd includes metric noise rather than hiding it.
+                rng_state = copy(Random.default_rng())
+                Random.seed!(base + seed + 2 * 10^6)
+                try
+                    for (name, f) in pairs(metrics)
+                        push!(scores[name],
+                              _metric_value(f(table, synth), metric_field))
+                    end
+                finally
+                    copy!(Random.default_rng(), rng_state)
                 end
             catch e
                 n_failed += 1
