@@ -69,7 +69,20 @@ function _detect_column_type(nm::Vector, T::Type)
         return _classify_numeric_cardinality(n_unique, n)
     end
 
-    # Fallback for anything else (Date, Char, custom types, Any, …)
+    # Dates and times are ORDERED, and their natural encoding is numeric.
+    # Treating them as categorical - which this used to do, via the fallback
+    # below - makes every distinct timestamp its own level. On a real
+    # personnel table that turned eight date columns into 2,447 one-hot
+    # dimensions out of 5,843 total, from 1,400 rows, which is enough to make
+    # DiffusionGenerator untrainable and its sampling take hours. It also
+    # discards chronology entirely: the copula's ordinal encoding is monotone
+    # in level order, so an arbitrary order is an arbitrary time axis.
+    #
+    # As :continuous they occupy one dimension, keep their ordering, and can
+    # take values between the observed ones.
+    T <: Union{Dates.Date, Dates.DateTime, Dates.Time} && return :continuous
+
+    # Fallback for anything else (Char, custom types, Any, …)
     n_unique == 2 && return :binary
     return :categorical
 end

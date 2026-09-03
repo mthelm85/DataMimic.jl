@@ -17,7 +17,7 @@ function _fit_marginal(nm::Vector, kind::Symbol, T::Type;
         return ConstantMarginal(val)
 
     elseif kind in (:continuous, :integer)
-        sorted = sort!(Float64.(nm))
+        sorted = sort!(_numeric.(nm))
         return EmpiricalMarginal(sorted, T)
 
     else  # :categorical or :binary
@@ -116,7 +116,7 @@ function _fit_copula(cols, copula_columns::Vector{Symbol},
         else
             for i in 1:nrows
                 v = col[i]
-                X[i, j] = ismissing(v) ? NaN : Float64(v)
+                X[i, j] = ismissing(v) ? NaN : _numeric(v)
             end
         end
     end

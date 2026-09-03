@@ -31,7 +31,7 @@ function _discretize_column(nm::Vector, kind::Symbol, T::Type, n_bins::Int;
 
     # ── Continuous / Integer ────────────────────────────────────────────
     if kind in (:continuous, :integer)
-        vals = Float64.(nm)
+        vals = _numeric.(nm)
         lo, hi = extrema(vals)
         if lo == hi                       # degenerate — single value
             edges = [lo - 0.5, hi + 0.5]
@@ -559,6 +559,9 @@ function _undiscretize(bins::Vector{Int}, info::DiscretizationInfo,
             vals[i] = edges[b] + rand(rng) * (edges[b + 1] - edges[b])
         end
         T = info.original_eltype
+        # Temporal columns are modelled on their numeric scale; rebuild them
+        # rather than handing back raw day/millisecond counts.
+        _is_temporal(T) && return [_from_temporal(T, v) for v in vals]
         if info.kind == :integer
             return T <: Integer ? round.(T, vals) : round.(vals)
         else

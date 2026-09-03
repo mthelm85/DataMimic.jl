@@ -5,7 +5,7 @@
 # breaking axis is the minor, so tracking the package version here would stop
 # this catching breaking format changes. Bump the major whenever a change makes
 # previously-saved models unreadable.
-const DATAMIMIC_SERIAL_VERSION = v"1.0.0"
+const DATAMIMIC_SERIAL_VERSION = v"1.1.0"
 
 """
     DataMimic.save(path::AbstractString, model::AbstractFittedModel)

@@ -4,6 +4,7 @@ using Test
 using Random
 using LinearAlgebra: eigvals
 using Statistics: cor
+using Dates
 using Lux, Zygote
 
 # A generator that always fails, used to check that compare() isolates a
@@ -95,6 +96,57 @@ DataMimic.privacy_budget(::BoomGenerator) = nothing
     # ════════════════════════════════════════════════════════════════════════
     # Column Detection
     # ════════════════════════════════════════════════════════════════════════
+    @testset "temporal columns are continuous, not categorical" begin
+        # Dates used to fall through to :categorical, making every distinct
+        # timestamp a one-hot level. On a real personnel table that turned
+        # eight date columns into 2,447 of 5,843 model dimensions from 1,400
+        # rows - enough to make DiffusionGenerator untrainable and its
+        # sampling take hours - and it discarded chronology, since the
+        # copula's ordinal encoding is monotone in level order.
+        rng = MersenneTwister(7)
+        n = 500
+        hire  = Date(2015, 1, 1) .+ Day.(rand(rng, 0:1500, n))
+        stamp = DateTime(2020, 1, 1) .+ Hour.(rand(rng, 0:4000, n))
+
+        @test DataMimic.detect_column_type(hire) == :continuous
+        @test DataMimic.detect_column_type(stamp) == :continuous
+        @test DataMimic.detect_column_type(
+            Vector{Union{Missing,Date}}(hire)) == :continuous
+
+        df = DataFrame(hire = hire, stamp = stamp,
+                       pay = randn(rng, n) .* 1000,
+                       grp = rand(rng, ["a", "b", "c"], n))
+
+        # Every engine must give the temporal type back, not a raw day count.
+        for gen in (CopulaGenerator(), CopulaGenerator(:gaussian),
+                    MSTGenerator(ε = 1.0), DPCopulaGenerator(ε = 1.0))
+            m = fit(gen, df; rng = MersenneTwister(8))
+            syn = sample(m, 120; rng = MersenneTwister(9))
+            @test eltype(syn.hire) === Date
+            @test eltype(syn.stamp) === DateTime
+            @test all(isfinite ∘ Dates.value, syn.hire)
+        end
+
+        # Chronology has to survive the round trip: a date that moves with a
+        # numeric column must still move with it.
+        n2 = 400
+        df2 = DataFrame(d = Date(2020, 1, 1) .+ Day.(1:n2),
+                        v = collect(1.0:n2) .+ randn(MersenneTwister(10), n2))
+        m2 = fit(CopulaGenerator(), df2; rng = MersenneTwister(11))
+        s2 = sample(m2, n2; rng = MersenneTwister(12))
+        @test cor(Dates.value.(s2.d), s2.v) > 0.9
+
+        # Continuous modelling means interpolation: dates between the
+        # observed ones are reachable, which a categorical encoding could
+        # never produce. This needs a column with GAPS - 500 draws from a
+        # 1,500-day span leaves plenty. Consecutive daily dates would have
+        # nothing to interpolate into, and the assertion would fail for a
+        # reason that says nothing about the encoding.
+        m3 = fit(CopulaGenerator(), df; rng = MersenneTwister(13))
+        s3 = sample(m3, 400; rng = MersenneTwister(14))
+        @test !isempty(setdiff(Set(s3.hire), Set(df.hire)))
+    end
+
     @testset "detect_column_type" begin
         using DataMimic: detect_column_type
 

@@ -26,7 +26,7 @@ function _fit_dp_marginal(nm::Vector, kind::Symbol, T::Type,
 
     if kind in (:continuous, :integer)
         k    = DP_COPULA_BINS
-        vals = Float64.(nm)
+        vals = _numeric.(nm)
         lo, hi = extrema(vals)
         lo == hi && return ConstantMarginal(first(nm))
 
@@ -122,6 +122,7 @@ function _invert_dp_marginal(m::DPHistogramMarginal,
     end
 
     T = m.original_eltype
+    _is_temporal(T) && return [_from_temporal(T, v) for v in vals]
     if T <: Integer
         return round.(T, vals)
     elseif T <: AbstractFloat
@@ -178,7 +179,7 @@ function _fit_dp_covariance_copula(cols, copula_columns::Vector{Symbol},
                 complete[i] = false
                 X[i, j] = NaN
             else
-                X[i, j] = _dp_cdf(m, Float64(v))
+                X[i, j] = _dp_cdf(m, _numeric(v))
             end
         end
     end

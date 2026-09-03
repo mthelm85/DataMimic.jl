@@ -113,6 +113,7 @@ function _preprocess(cols, col_names, col_kinds, id_set, hints, nrows;
     cat_cols       = Symbol[]
     num_references = Vector{Float32}[]   # sorted training values per column
     num_round      = Bool[]              # round to integers on inverse transform
+    num_eltypes    = Type[]              # original eltype per numeric column
     cat_levels     = Dict{Symbol, Vector}()
     cat_dims       = Int[]
 
@@ -143,8 +144,11 @@ function _preprocess(cols, col_names, col_kinds, id_set, hints, nrows;
 
         if kind in (:continuous, :integer)
             push!(num_cols, name)
-            nm = Float32.(DataMimic._nonmissing(collect(Tables.getcolumn(cols, name))))
+            nm = Float32.(DataMimic._numeric.(
+                DataMimic._nonmissing(collect(Tables.getcolumn(cols, name)))))
             push!(num_references, sort(nm))
+            push!(num_eltypes,
+                  nonmissingtype(eltype(Tables.getcolumn(cols, name))))
             # The reference implementation rounds a numeric column back to
             # integers when the training values are integral and few-valued.
             uniq = unique(nm)
@@ -167,6 +171,28 @@ function _preprocess(cols, col_names, col_kinds, id_set, hints, nrows;
     d_num = length(num_cols)
     d_cat_total = sum(cat_dims; init = 0)
 
+    # Every categorical level is a one-hot dimension, so a handful of
+    # high-cardinality columns can make the feature space wider than the table
+    # is long. Training still prints per epoch and looks healthy; sampling then
+    # runs `num_timesteps` steps over that width and takes hours, silently.
+    # Say so here, while the caller is still watching, rather than after.
+    let width = d_num + d_cat_total
+        if width > nrows
+            widest = sort([(cat_cols[i], cat_dims[i]) for i in eachindex(cat_dims)],
+                          by = last, rev = true)
+            top = join(["$(n) ($(d))" for (n, d) in first(widest, 3)], ", ")
+            @warn "DiffusionGenerator: $(width) model dimensions " *
+                  "($(d_cat_total) one-hot + $(d_num) numeric) from only " *
+                  "$(nrows) rows. Widest categoricals: $top. Sampling cost " *
+                  "scales with this width times `num_timesteps`, so it can " *
+                  "take far longer than training and prints nothing while it " *
+                  "runs. Training on more dimensions than rows is also " *
+                  "unlikely to converge, especially under a privacy budget. " *
+                  "If any of those columns is closer to an identifier than a " *
+                  "category, pass it in `identifiers`."
+        end
+    end
+
     # ── Build numeric matrix (Gaussian quantile transform) ──────────────
     X_num = zeros(Float32, d_num, nrows)
     for (j, name) in enumerate(num_cols)
@@ -178,7 +204,7 @@ function _preprocess(cols, col_names, col_kinds, id_set, hints, nrows;
             if ismissing(v)
                 X_num[j, i] = 0f0   # missing → median of N(0,1)
             else
-                X_num[j, i] = _quantile_forward(Float32(v), ref, n_ref)
+                X_num[j, i] = _quantile_forward(Float32(DataMimic._numeric(v)), ref, n_ref)
             end
         end
     end
@@ -212,7 +238,7 @@ function _preprocess(cols, col_names, col_kinds, id_set, hints, nrows;
         counts ./ sum(counts)
     end
 
-    info = (; num_cols, cat_cols, num_references, num_round,
+    info = (; num_cols, cat_cols, num_references, num_round, num_eltypes,
               cat_levels, cat_dims, d_num, d_cat_total,
               target_levels, y_indices, class_dist)
     return X_num, X_cat_oh, cat_indices, info
@@ -1714,6 +1740,20 @@ function _denoise_sample_finite(backbone, emb_layer, ps_bb, ps_emb, st_bb, st_em
         nkeep = count(keep)
         total_drawn += draw
         total_kept  += nkeep
+
+        # The weights do not change between attempts, so if the first draw is
+        # almost entirely non-finite the remaining attempts will be too. Each
+        # one costs a full `num_timesteps` pass over up to 4n rows, which on a
+        # wide table is many minutes of silence per attempt. Give up now and
+        # let the error below explain why.
+        if attempt == 1 && nkeep < draw ÷ 4
+            @warn "DiffusionGenerator: only $nkeep of $draw sampled rows were " *
+                  "finite on the first attempt. The reverse process has " *
+                  "diverged; retrying would redraw from the same weights, so " *
+                  "stopping here rather than spending several more full " *
+                  "sampling passes to reach the same conclusion."
+            break
+        end
         if nkeep > 0
             take = min(nkeep, n - have)
             idx  = findall(keep)[1:take]
@@ -1796,7 +1836,22 @@ function _denoise_sample(backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
         _to_device(zeros(Float32, 0, n), gdev)
     end
 
+    t_start = time()
+    report_every = max(1, T ÷ 10)
+
     for t in T:-1:1
+        # Sampling runs T steps over the full feature width and, before this,
+        # printed nothing at all - so a draw that takes half an hour on a wide
+        # table was indistinguishable from a hang. Report on the same cadence
+        # as training.
+        done = T - t
+        if done > 0 && done % report_every == 0
+            el = time() - t_start
+            @info "Sampling step $done/$T  " *
+                  "elapsed=$(round(Int, el))s  " *
+                  "ETA=$(round(Int, el * (T - done) / done))s"
+        end
+
         coef = _scalar_coefs(sched, t)
         # Timestep embedding uses 0-based t, as in the reference code
         t_batch = _to_device(fill(Float32(t - 1), n), gdev)
@@ -1972,7 +2027,7 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
         info.num_cols, info.cat_cols,
         info.num_references,
         info.cat_levels, info.cat_dims,
-        info.num_round,
+        info.num_round, info.num_eltypes,
         gen.target, info.target_levels, info.class_dist,
         full_model, full_ps, full_st,
         n_steps, betas, alphas_cumprod,
@@ -2051,7 +2106,10 @@ function sample(model::FittedDiffusionModel, n::Int;
 
         idx = findfirst(==(name), model.column_names)
         kind = model.column_kinds[idx]
-        if kind == :integer || model.num_round[j]
+        T = model.num_eltypes[j]
+        if DataMimic._is_temporal(T)
+            result[name] = [DataMimic._from_temporal(T, Float64(v)) for v in raw]
+        elseif kind == :integer || model.num_round[j]
             result[name] = round.(Int64, raw)
         else
             result[name] = Float64.(raw)

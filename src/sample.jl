@@ -17,7 +17,36 @@ function _invert_empirical(m::EmpiricalMarginal, u_vec::AbstractVector{Float64})
 end
 
 # Cast Float64 quantile output to the column's original element type.
+"""
+Numeric value of a temporal type, for modelling it as a continuous column.
+
+`Dates.value` gives days for `Date` and milliseconds for `DateTime`/`Time`,
+so the scale is the type's own natural unit and the round trip is exact for
+any value that survives rounding.
+"""
+_temporal_value(x) = Float64(Dates.value(x))
+
+"""
+Numeric view of a value being modelled as continuous or integer.
+
+Temporal types have no `Float64` conversion of their own - `Float64(::Date)`
+is a MethodError - so they go through `Dates.value`. Everything else is an
+ordinary numeric conversion.
+"""
+_numeric(x) = x isa Union{Dates.Date, Dates.DateTime, Dates.Time} ?
+              _temporal_value(x) : Float64(x)
+
+_is_temporal(::Type{T}) where {T} = T <: Union{Dates.Date, Dates.DateTime, Dates.Time}
+
+"""Rebuild a temporal value from the numeric representation above."""
+_from_temporal(::Type{Dates.Date}, x::Float64)     = Dates.Date(Dates.UTD(round(Int64, x)))
+_from_temporal(::Type{Dates.DateTime}, x::Float64) = Dates.DateTime(Dates.UTM(round(Int64, x)))
+_from_temporal(::Type{Dates.Time}, x::Float64)     = Dates.Time(Dates.Nanosecond(round(Int64, x)))
+
 function _cast_numeric(vals::Vector{Float64}, col_kind::Symbol, T::Type)
+    # Temporal columns are modelled on their numeric scale and rebuilt here.
+    _is_temporal(T) && return [_from_temporal(T, v) for v in vals]
+
     if col_kind == :integer
         rounded = round.(Int64, vals)
         return T <: Integer ? convert(Vector{T}, rounded) :

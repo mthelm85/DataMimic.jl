@@ -382,6 +382,9 @@ struct FittedDiffusionModel{L, P, S, Mat} <: AbstractFittedModel
     cat_levels::Dict{Symbol, Vector}     # column → sorted levels
     cat_dims::Vector{Int}                # one-hot width per cat column
     num_round::Vector{Bool}              # round to integers on inverse transform
+    num_eltypes::Vector{Type}            # original eltype per numeric column, so
+                                         # temporal columns rebuild as Date/DateTime
+                                         # rather than as raw day counts
     # Class conditioning (nothing = unconditional)
     target::Union{Symbol, Nothing}       # label column, or nothing
     target_levels::Vector                # label values in model order
