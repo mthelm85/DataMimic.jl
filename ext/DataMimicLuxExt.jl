@@ -1936,7 +1936,9 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
           (n_classes > 0 ? " (class-conditional on :$(gen.target), $n_classes classes)" : "")
 
     # ── Train ──────────────────────────────────────────────────────────
-    if gen.dp
+    # A budget on the generator is what selects DP-SGD; there is no separate
+    # `dp` flag to disagree with it.
+    if privacy !== nothing
         ps_bb, ps_emb, st_bb, st_emb = _train_dpsgd!(
             backbone, emb_layer, ps_bb, ps_emb, st_bb, st_emb,
             X_num, X_cat_oh, info.y_indices,

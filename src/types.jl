@@ -13,7 +13,7 @@ abstract type AbstractFittedModel end
     PrivacyBudget(; ε, δ=1e-5)
 
 Differential privacy parameters used by private generators
-(`MSTGenerator`, `DPCopulaGenerator`, `DiffusionGenerator(dp=true)`).
+(`MSTGenerator`, `DPCopulaGenerator`, and `DiffusionGenerator` when given one).
 
 `ε`/`δ` are accepted as aliases for `epsilon`/`delta`, and both spellings read
 back off the resulting budget. Passing both spellings of the same parameter is
@@ -61,7 +61,32 @@ end
 
 Base.propertynames(::PrivacyBudget) = (:epsilon, :delta, :ε, :δ)
 
+Base.show(io::IO, b::PrivacyBudget) =
+    print(io, "PrivacyBudget(ε = ", b.epsilon, ", δ = ", b.delta, ")")
+
 # ─── Generator Configs ───────────────────────────────────────────────────────
+
+"""
+Resolve a private generator's budget argument.
+
+Accepts a `PrivacyBudget` directly, or the same keywords `PrivacyBudget` takes,
+so `MSTGenerator(ε = 1.0)` and `MSTGenerator(PrivacyBudget(ε = 1.0))` both
+work. The budget is required: a private generator without one cannot run, and
+making that unrepresentable is the point of holding it here rather than passing
+it to `fit`.
+"""
+function _resolve_budget(budget, epsilon, delta, ε, δ, name::Symbol)
+    if budget !== nothing
+        all(isnothing, (epsilon, delta, ε, δ)) ||
+            throw(ArgumentError(
+                "$name: pass a PrivacyBudget or its keywords, not both"))
+        return budget
+    end
+    epsilon === nothing && ε === nothing && throw(ArgumentError(
+        "$name is a private generator and requires a privacy budget. " *
+        "Try $name(ε = 1.0), or $name(PrivacyBudget(ε = 1.0, δ = 1e-5))."))
+    return PrivacyBudget(; epsilon = epsilon, delta = delta, ε = ε, δ = δ)
+end
 
 """
     CopulaGenerator(copula_type::Symbol=:beta)
@@ -103,7 +128,13 @@ adopted on the paper's authority: better or neutral on three of four real
 tables, at a small cost on one whose columns are mostly binary. See the MST
 implementation note in REQUIREMENTS.md.
 """
-struct MSTGenerator <: AbstractPrivateGenerator end
+struct MSTGenerator <: AbstractPrivateGenerator
+    privacy::PrivacyBudget
+end
+
+MSTGenerator(; privacy = nothing, epsilon = nothing, delta = nothing,
+               ε = nothing, δ = nothing) =
+    MSTGenerator(_resolve_budget(privacy, epsilon, delta, ε, δ, :MSTGenerator))
 
 """
     DPCopulaGenerator()
@@ -111,10 +142,16 @@ struct MSTGenerator <: AbstractPrivateGenerator end
 DP-noisy histogram marginals + private covariance Gaussian copula.
 Suited for continuous-heavy tables under moderate ε.
 """
-struct DPCopulaGenerator <: AbstractPrivateGenerator end
+struct DPCopulaGenerator <: AbstractPrivateGenerator
+    privacy::PrivacyBudget
+end
+
+DPCopulaGenerator(; privacy = nothing, epsilon = nothing, delta = nothing,
+                    ε = nothing, δ = nothing) =
+    DPCopulaGenerator(_resolve_budget(privacy, epsilon, delta, ε, δ, :DPCopulaGenerator))
 
 """
-    DiffusionGenerator(; dp=false, epochs=100, batch_size=512, target=nothing)
+    DiffusionGenerator(; privacy=nothing, epochs=100, batch_size=512, target=nothing)
 
 TabDDPM [Kotelnikov et al. 2023] with optional DP-SGD.  Requires the `LuxExt`
 package extension (`using Lux, Zygote` before calling `fit`).
@@ -146,7 +183,7 @@ sampling.
 - `ema_decay`: EMA rate for the sampling weights (0 disables EMA).
 """
 Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
-    dp::Bool           = false
+    privacy::Union{Nothing, PrivacyBudget} = nothing
     epochs::Int        = 100
     batch_size::Int    = 512
     hidden_dim::Int    = 0      # 0 = auto: min(256, max(64, 4·d_features))
@@ -161,7 +198,7 @@ Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
     ema_decay::Float64 = 0.999  # 0 = disable EMA
     target::Union{Symbol, Nothing} = nothing   # class-conditional label column
 
-    function DiffusionGenerator(dp, epochs, batch_size, hidden_dim, n_blocks,
+    function DiffusionGenerator(privacy, epochs, batch_size, hidden_dim, n_blocks,
                                 d_layers, num_timesteps, embed_dim, dropout, lr,
                                 lr_warmup, weight_decay, ema_decay, target)
         epochs > 0     || throw(ArgumentError("epochs must be positive, got $epochs"))
@@ -176,7 +213,7 @@ Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
         lr_warmup >= 0 || throw(ArgumentError("lr_warmup must be non-negative, got $lr_warmup"))
         weight_decay >= 0 || throw(ArgumentError("weight_decay must be non-negative, got $weight_decay"))
         0.0 <= ema_decay < 1.0 || throw(ArgumentError("ema_decay must be in [0,1), got $ema_decay"))
-        new(dp, epochs, batch_size, hidden_dim, n_blocks, d_layers, num_timesteps,
+        new(privacy, epochs, batch_size, hidden_dim, n_blocks, d_layers, num_timesteps,
             embed_dim, dropout, lr, lr_warmup, weight_decay, ema_decay, target)
     end
 end

@@ -65,7 +65,7 @@ than accepting it and quietly providing no guarantee.
 
 ```julia
 budget = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
-model  = fit(MSTGenerator(), df; privacy = budget)
+model  = fit(MSTGenerator(privacy = budget), df)
 syn    = sample(model, 500)
 ```
 
@@ -79,8 +79,7 @@ reliably predictable from its shape. [`compare`](@ref) fits several to your own
 data and reports how each did:
 
 ```julia
-compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator()], df;
-        privacy = PrivacyBudget(epsilon = 1.0))
+compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator(ε = 1.0)], df)
 ```
 
 ## Where to go next

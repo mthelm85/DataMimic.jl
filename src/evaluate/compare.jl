@@ -16,7 +16,7 @@
 #      penalise exactly the engines a privacy-conscious user came for.
 
 """
-    compare(generators, table; metrics, n, n_seeds, privacy, ...) -> Vector{NamedTuple}
+    compare(generators, table; metrics, n, n_seeds, ...) -> Vector{NamedTuple}
 
 Fit each generator to `table`, sample from it, and score the result with each
 metric.  Returns one row per generator × metric, carrying the mean and standard
@@ -40,7 +40,10 @@ it to `DataFrame` to sort or pivot.
   `table` has).
 - `n_seeds = 3`: how many times to repeat each fit and sample.  Fewer than 3
   makes the reported standard deviation meaningless.
-- `privacy = nothing`: budget for private generators.  Public generators are
+- Budgets are carried by the generators themselves, so one call can compare
+  the same engine at several ε:
+  `compare([MSTGenerator(ε = 0.5), MSTGenerator(ε = 2.0), CopulaGenerator()], df)`.
+  Public generators are
   fitted without one, so a mixed list works in a single call.
 - `hints`, `identifiers`, `fill`: forwarded to `fit`.
 - `rng`: seeds derive from this, so a run is reproducible.
@@ -72,7 +75,6 @@ function compare(generators, table;
                  metric_field::Symbol = :aggregate,
                  n::Union{Nothing, Int} = nothing,
                  n_seeds::Int = 3,
-                 privacy::Union{Nothing, PrivacyBudget} = nothing,
                  hints::Vector{ColumnHint} = ColumnHint[],
                  identifiers::Vector{Symbol} = Symbol[],
                  fill = Dict{Symbol, FillSpec}(),
@@ -100,10 +102,6 @@ function compare(generators, table;
     labels = _compare_labels(generators)
 
     for (gen, label) in zip(_compare_gens(generators), labels)
-        # Private generators require a budget and public ones reject it, so the
-        # budget is passed only where it belongs and a mixed list works.
-        gen_privacy = _wants_privacy(gen) ? privacy : nothing
-
         scores   = Dict{Symbol, Vector{Float64}}(k => Float64[] for k in keys(metrics))
         times    = Float64[]
         n_failed = 0
@@ -113,7 +111,7 @@ function compare(generators, table;
             try
                 t0 = time()
                 model = DataMimic.fit(gen, table;
-                                      privacy = gen_privacy, hints = hints,
+                                      hints = hints,
                                       identifiers = identifiers, fill = fill,
                                       rng = Random.MersenneTwister(base + seed))
                 elapsed = time() - t0
@@ -166,6 +164,9 @@ function _auto_label(gen)
     fields = fieldnames(T)
     length(fields) == 1 || return name
     v = getfield(gen, first(fields))
+    # A budget is the interesting difference between two rows of the same
+    # engine, but its full repr crowds the table; ε is what distinguishes them.
+    v isa DataMimic.PrivacyBudget && return string(name, "(ε = ", v.epsilon, ")")
     return string(name, "(", v isa Symbol ? ":" * string(v) : string(v), ")")
 end
 
@@ -185,9 +186,6 @@ function _compare_labels(generators)
 end
 
 # Which generators need the budget handed to them.
-_wants_privacy(::DataMimic.AbstractPrivateGenerator) = true
-_wants_privacy(gen::DataMimic.DiffusionGenerator)    = gen.dp
-_wants_privacy(::Any)                                = false
 
 _cmp_mean(v) = sum(v) / length(v)
 _cmp_sd(v)   = sqrt(sum(abs2, v .- _cmp_mean(v)) / (length(v) - 1))

@@ -90,7 +90,7 @@ function run_arm(df, eps::Float64, compress::Bool, seed::Int)
     DataMimic.MST_DOMAIN_COMPRESSION[] = compress
     try
         pb = PrivacyBudget(epsilon = eps, delta = 1e-5)
-        model = fit(MSTGenerator(), df; privacy = pb,
+        model = fit(MSTGenerator(privacy = pb), df;
                     rng = MersenneTwister(1000 + seed))
         st = DataMimic.MST_COMPRESSION_STATS[]
         synth = sample(model, nrow(df); rng = MersenneTwister(2000 + seed))

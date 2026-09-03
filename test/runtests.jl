@@ -10,7 +10,7 @@ using Lux, Zygote
 # broken engine instead of letting it abort the whole comparison.
 struct BoomGenerator <: DataMimic.AbstractGenerator end
 DataMimic._fit_engine(::BoomGenerator, args...) = error("engine exploded")
-DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
+DataMimic.privacy_budget(::BoomGenerator) = nothing
 
 @testset "DataMimic.jl" begin
 
@@ -50,20 +50,26 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         end
 
         @testset "MSTGenerator" begin
-            # Marginal order is not a parameter: MST is the 2-way spanning tree.
-            # The type carries no fields, so there is nothing to configure and
-            # nothing to get wrong.
-            @test MSTGenerator() isa DataMimic.AbstractPrivateGenerator
-            @test fieldcount(MSTGenerator) == 0
-            @test_throws MethodError MSTGenerator(2)
-            @test_throws MethodError MSTGenerator(3)
+            # Marginal order is not a parameter: MST is the 2-way spanning
+            # tree. The budget is the only thing to configure, and it is
+            # required - a private generator without one cannot run, so the
+            # type refuses to represent that state at all.
+            g = MSTGenerator(ε = 1.0)
+            @test g isa DataMimic.AbstractPrivateGenerator
+            @test fieldnames(MSTGenerator) == (:privacy,)
+            @test privacy_budget(g).epsilon == 1.0
+            @test MSTGenerator(PrivacyBudget(ε = 1.0)) == g
+            @test_throws ArgumentError MSTGenerator()        # no budget
+            @test_throws MethodError   MSTGenerator(2)       # not a budget
+            # Marginal order is gone for good.
+            @test_throws MethodError MSTGenerator(2, 3)
         end
 
         @testset "DiffusionGenerator" begin
             dg = DiffusionGenerator()
             @test dg.epochs == 100
             @test dg.batch_size == 512
-            @test dg.dp == false
+            @test dg.privacy === nothing   # no budget = no DP-SGD
             @test_throws ArgumentError DiffusionGenerator(epochs = 0)
             @test_throws ArgumentError DiffusionGenerator(batch_size = 0)
         end
@@ -350,21 +356,33 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         # And a budget built either way still drives a private fit.
         df = DataFrame(a = randn(MersenneTwister(1), 300),
                        b = rand(MersenneTwister(2), ["x", "y", "z"], 300))
-        m = fit(MSTGenerator(), df; privacy = PrivacyBudget(ε = 1.0),
-                rng = MersenneTwister(3))
+        m = fit(MSTGenerator(ε = 1.0), df; rng = MersenneTwister(3))
         @test nrow(sample(m, 50; rng = MersenneTwister(4))) == 50
     end
 
-    @testset "privacy validation" begin
+    @testset "privacy is a property of the generator" begin
         df = make_df()
         pb = PrivacyBudget(epsilon = 1.0)
 
-        # Public generator rejects privacy budget
-        @test_throws ArgumentError fit(CopulaGenerator(), df; privacy = pb)
+        # These used to be three `_validate_privacy` methods checking at fit
+        # time what construction can now make impossible.
 
-        # Private generator requires privacy budget
-        @test_throws ArgumentError fit(MSTGenerator(), df)
-        @test_throws ArgumentError fit(DPCopulaGenerator(), df)
+        # A public generator has nowhere to put a budget, so the mistake is a
+        # dispatch failure rather than a runtime check inside fit.
+        @test privacy_budget(CopulaGenerator()) === nothing
+        @test_throws MethodError CopulaGenerator(privacy = pb)
+
+        # A private generator cannot be built without one.
+        @test_throws ArgumentError MSTGenerator()
+        @test_throws ArgumentError DPCopulaGenerator()
+
+        # And fit no longer accepts a budget at all.
+        @test_throws MethodError fit(MSTGenerator(privacy = pb), df;
+                                     privacy = pb)
+
+        # The budget the generator carries is the one that gets spent.
+        @test privacy_budget(MSTGenerator(privacy = pb)) === pb
+        @test privacy_budget(DPCopulaGenerator(ε = 2.0)).epsilon == 2.0
     end
 
     # ════════════════════════════════════════════════════════════════════════
@@ -623,8 +641,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         pb = PrivacyBudget(epsilon = 2.0, delta = 1e-5)
 
         @testset "basic fit + sample" begin
-            model = fit(MSTGenerator(), tbl;
-                        privacy = pb, rng = MersenneTwister(42))
+            model = fit(MSTGenerator(privacy = pb), tbl;
+                        rng = MersenneTwister(42))
             @test model isa FittedMSTModel
             @test length(model.stat_columns) == 4
             @test model.n_original == n
@@ -642,8 +660,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
 
         @testset "DataFrame round-trip" begin
             df = DataFrame(tbl)
-            model = fit(MSTGenerator(), df;
-                        privacy = pb, rng = MersenneTwister(42))
+            model = fit(MSTGenerator(privacy = pb), df;
+                        rng = MersenneTwister(42))
             syn = sample(model, 50)
             @test syn isa DataFrame
             @test nrow(syn) == 50
@@ -656,8 +674,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
                 val = randn(n),
                 cat = rand(["a", "b", "c"], n),
             )
-            model = fit(MSTGenerator(), df;
-                        privacy = pb, identifiers = [:id],
+            model = fit(MSTGenerator(privacy = pb), df;
+                        identifiers = [:id],
                         fill = Dict(:id => :sequential),
                         rng = MersenneTwister(42))
             syn = sample(model, 30)
@@ -731,8 +749,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         end
 
         @testset "reproducibility" begin
-            m1 = fit(MSTGenerator(), tbl; privacy = pb, rng = MersenneTwister(1))
-            m2 = fit(MSTGenerator(), tbl; privacy = pb, rng = MersenneTwister(1))
+            m1 = fit(MSTGenerator(privacy = pb), tbl; rng = MersenneTwister(1))
+            m2 = fit(MSTGenerator(privacy = pb), tbl; rng = MersenneTwister(1))
 
             s1 = sample(m1, 40; rng = MersenneTwister(99))
             s2 = sample(m2, 40; rng = MersenneTwister(99))
@@ -742,8 +760,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
 
         @testset "single column" begin
             single = (; x = rand(rng_data, ["a", "b", "c"], 50))
-            model = fit(MSTGenerator(), single;
-                        privacy = pb, rng = MersenneTwister(42))
+            model = fit(MSTGenerator(privacy = pb), single;
+                        rng = MersenneTwister(42))
             @test isempty(model.tree_edges)
             syn = sample(model, 20)
             @test length(syn.x) == 20
@@ -755,8 +773,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
                 a = rand(rng_data, ["x", "y", "z"], n),
                 b = rand(rng_data, ["p", "q"], n),
             )
-            model = fit(MSTGenerator(), cat_tbl;
-                        privacy = pb, rng = MersenneTwister(42))
+            model = fit(MSTGenerator(privacy = pb), cat_tbl;
+                        rng = MersenneTwister(42))
             syn = sample(model, 40)
             @test all(v -> v ∈ ["x", "y", "z"], syn.a)
             @test all(v -> v ∈ ["p", "q"], syn.b)
@@ -819,7 +837,7 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
             end
             pb = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
 
-            m = fit(MSTGenerator(), df; privacy = pb, rng = MersenneTwister(5))
+            m = fit(MSTGenerator(privacy = pb), df; rng = MersenneTwister(5))
             st = MST_COMPRESSION_STATS[]
             @test st.bins_after < st.bins_before      # something actually merged
 
@@ -847,8 +865,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
             prev = MST_DOMAIN_COMPRESSION[]
             MST_DOMAIN_COMPRESSION[] = false
             try
-                a = fit(MSTGenerator(), df; privacy = pb, rng = MersenneTwister(5))
-                b = fit(MSTGenerator(), df; privacy = pb, rng = MersenneTwister(5))
+                a = fit(MSTGenerator(privacy = pb), df; rng = MersenneTwister(5))
+                b = fit(MSTGenerator(privacy = pb), df; rng = MersenneTwister(5))
                 @test a.tree_edges == b.tree_edges
                 @test a.root_marginal == b.root_marginal
                 @test MST_COMPRESSION_STATS[].bins_after ==
@@ -874,8 +892,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         pb = PrivacyBudget(epsilon = 4.0, delta = 1e-5)
 
         @testset "basic fit + sample" begin
-            model = fit(DPCopulaGenerator(), tbl;
-                        privacy = pb, rng = MersenneTwister(42))
+            model = fit(DPCopulaGenerator(privacy = pb), tbl;
+                        rng = MersenneTwister(42))
             @test model isa FittedDPCopulaModel
             @test :x in model.copula_columns
             @test :y in model.copula_columns
@@ -892,8 +910,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
 
         @testset "DataFrame round-trip" begin
             df = DataFrame(tbl)
-            model = fit(DPCopulaGenerator(), df;
-                        privacy = pb, rng = MersenneTwister(42))
+            model = fit(DPCopulaGenerator(privacy = pb), df;
+                        rng = MersenneTwister(42))
             syn = sample(model, 50)
             @test syn isa DataFrame
             @test nrow(syn) == 50
@@ -905,8 +923,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
                 cat = rand(rng_data, ["a", "b"], 50),
             )
             model = @test_logs (:warn, r"one numeric") fit(
-                DPCopulaGenerator(), single;
-                privacy = pb, rng = MersenneTwister(42))
+                DPCopulaGenerator(privacy = pb), single;
+                rng = MersenneTwister(42))
             @test isnothing(model.copula)
             syn = sample(model, 20)
             @test length(syn.x) == 20
@@ -918,8 +936,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
                 b = rand(rng_data, ["p", "q"], 50),
             )
             model = @test_logs (:warn, r"No numeric") fit(
-                DPCopulaGenerator(), cat_tbl;
-                privacy = pb, rng = MersenneTwister(42))
+                DPCopulaGenerator(privacy = pb), cat_tbl;
+                rng = MersenneTwister(42))
             syn = sample(model, 20)
             @test all(v -> v ∈ ["x", "y", "z"], syn.a)
         end
@@ -955,9 +973,9 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         end
 
         @testset "reproducibility" begin
-            m1 = fit(DPCopulaGenerator(), tbl; privacy = pb,
+            m1 = fit(DPCopulaGenerator(privacy = pb), tbl; 
                      rng = MersenneTwister(1))
-            m2 = fit(DPCopulaGenerator(), tbl; privacy = pb,
+            m2 = fit(DPCopulaGenerator(privacy = pb), tbl; 
                      rng = MersenneTwister(1))
 
             s1 = sample(m1, 40; rng = MersenneTwister(99))
@@ -972,8 +990,8 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
                 val = randn(rng_data, n),
                 cat = rand(rng_data, ["a", "b"], n),
             )
-            model = fit(DPCopulaGenerator(), df;
-                        privacy = pb, identifiers = [:id],
+            model = fit(DPCopulaGenerator(privacy = pb), df;
+                        identifiers = [:id],
                         fill = Dict(:id => :sequential_int),
                         rng = MersenneTwister(42))
             syn = sample(model, 25)
@@ -992,7 +1010,7 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         pb = PrivacyBudget(epsilon = 4.0)
 
         @testset "MST" begin
-            model = fit(MSTGenerator(), tbl; privacy = pb,
+            model = fit(MSTGenerator(privacy = pb), tbl; 
                         rng = MersenneTwister(42))
             @test isapprox(model.missingness[:x], 0.1, atol = 0.01)
             syn = sample(model, 500)
@@ -1002,7 +1020,7 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         end
 
         @testset "DPCopula" begin
-            model = fit(DPCopulaGenerator(), tbl; privacy = pb,
+            model = fit(DPCopulaGenerator(privacy = pb), tbl; 
                         rng = MersenneTwister(42))
             @test isapprox(model.missingness[:x], 0.1, atol = 0.01)
             syn = sample(model, 500)
@@ -1019,7 +1037,7 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         tbl = (; x = randn(50), y = rand(["a", "b"], 50))
 
         @testset "MST model" begin
-            model = fit(MSTGenerator(), tbl; privacy = pb,
+            model = fit(MSTGenerator(privacy = pb), tbl; 
                         rng = MersenneTwister(42))
             path = tempname() * ".dmimic"
             save(path, model)
@@ -1032,7 +1050,7 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         end
 
         @testset "DPCopula model" begin
-            model = fit(DPCopulaGenerator(), tbl; privacy = pb,
+            model = fit(DPCopulaGenerator(privacy = pb), tbl; 
                         rng = MersenneTwister(42))
             path = tempname() * ".dmimic"
             save(path, model)
@@ -1051,24 +1069,25 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         pb = PrivacyBudget(epsilon = 1.0)
         tbl = (; x = randn(50), y = rand(["a", "b"], 50))
 
-        # Private generators reject missing privacy
-        @test_throws ArgumentError fit(MSTGenerator(), tbl)
-        @test_throws ArgumentError fit(DPCopulaGenerator(), tbl)
+        # A private generator without a budget is now unconstructable, so
+        # there is no fit-time rejection left to test.
+        @test_throws ArgumentError MSTGenerator()
+        @test_throws ArgumentError DPCopulaGenerator()
 
         # sample with n < 1
-        model = fit(MSTGenerator(), tbl; privacy = pb,
+        model = fit(MSTGenerator(privacy = pb), tbl; 
                     rng = MersenneTwister(42))
         @test_throws ArgumentError sample(model, 0)
 
-        model2 = fit(DPCopulaGenerator(), tbl; privacy = pb,
+        model2 = fit(DPCopulaGenerator(privacy = pb), tbl; 
                      rng = MersenneTwister(42))
         @test_throws ArgumentError sample(model2, 0)
 
-        # DiffusionGenerator privacy validation
-        @test_throws ArgumentError fit(DiffusionGenerator(; dp = true),
-                                       tbl)   # dp=true needs a budget
-        @test_throws ArgumentError fit(DiffusionGenerator(; dp = false),
-                                       tbl; privacy = pb)   # dp=false rejects budget
+        # DiffusionGenerator: the budget's presence is what selects DP-SGD,
+        # so there is no `dp` flag left that could disagree with it, and
+        # nothing for `fit` to validate.
+        @test privacy_budget(DiffusionGenerator()) === nothing
+        @test privacy_budget(DiffusionGenerator(; privacy = pb)) === pb
     end
 
     # ════════════════════════════════════════════════════════════════════════
@@ -1078,13 +1097,13 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         pb = PrivacyBudget(epsilon = 2.0)
         df = DataFrame(x = randn(80), y = rand(["a", "b", "c"], 80))
 
-        syn = synthesize(MSTGenerator(), df, 40;
-                         privacy = pb, rng = MersenneTwister(42))
+        syn = synthesize(MSTGenerator(privacy = pb), df, 40;
+                         rng = MersenneTwister(42))
         @test syn isa DataFrame
         @test nrow(syn) == 40
 
-        syn2 = synthesize(DPCopulaGenerator(), df, 40;
-                          privacy = pb, rng = MersenneTwister(42))
+        syn2 = synthesize(DPCopulaGenerator(privacy = pb), df, 40;
+                          rng = MersenneTwister(42))
         @test syn2 isa DataFrame
         @test nrow(syn2) == 40
     end
@@ -1215,26 +1234,14 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         )
         pb = PrivacyBudget(epsilon = 10.0, delta = 1e-5)
 
-        @testset "fit + sample with dp=true" begin
-            model = fit(DiffusionGenerator(; dp = true, epochs = 2,
+        @testset "fit + sample under a privacy budget" begin
+            model = fit(DiffusionGenerator(; epochs = 2,
                                              batch_size = 16),
-                        tbl; privacy = pb, rng = MersenneTwister(42))
+                        tbl; rng = MersenneTwister(42))
             @test model isa FittedDiffusionModel
             syn = sample(model, 20)
             @test length(syn.x) == 20
             @test all(c -> c ∈ ["a", "b", "c"], syn.cat)
-        end
-
-        @testset "dp=true without budget → error" begin
-            @test_throws ArgumentError fit(
-                DiffusionGenerator(; dp = true, epochs = 2),
-                tbl; rng = MersenneTwister(42))
-        end
-
-        @testset "dp=false with budget → error" begin
-            @test_throws ArgumentError fit(
-                DiffusionGenerator(; dp = false, epochs = 2),
-                tbl; privacy = pb, rng = MersenneTwister(42))
         end
 
         # A diverged run used to report loss=NaN and keep going: gradients
@@ -1284,10 +1291,10 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
         @testset "Poisson subsampling tolerates empty lots" begin
             small = (; x = randn(MersenneTwister(7), Float32, 8),
                        c = rand(MersenneTwister(8), ["a", "b"], 8))
-            model = fit(DiffusionGenerator(; dp = true, epochs = 2,
+            model = fit(DiffusionGenerator(; epochs = 2,
                                              batch_size = 1, num_timesteps = 10,
                                              hidden_dim = 8, n_blocks = 1),
-                        small; privacy = pb, rng = MersenneTwister(42))
+                        small; rng = MersenneTwister(42))
             @test model isa FittedDiffusionModel
             syn = sample(model, 5)
             @test length(syn.x) == 5
@@ -1679,10 +1686,22 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
                                rng = MersenneTwister(3))
                 @test Set(r.generator for r in res2) == Set(["A", "B"])
 
+                # One engine at two budgets is a comparison the previous API
+                # could not express at all: the budget was a single keyword
+                # shared by every generator in the call.
+                res_eps = compare([MSTGenerator(ε = 0.5), MSTGenerator(ε = 4.0)], cdf;
+                                  metrics = (fid = fidelity_score,), n_seeds = 3,
+                                  rng = MersenneTwister(5))
+                eps_labels = unique(r.generator for r in res_eps)
+                @test length(eps_labels) == 2
+                @test any(l -> occursin("0.5", l), eps_labels)
+                @test any(l -> occursin("4.0", l), eps_labels)
+
                 # Genuinely identical generators are numbered rather than merged.
-                res3 = compare([DPCopulaGenerator(), DPCopulaGenerator()], cdf;
+                res3 = compare([DPCopulaGenerator(privacy = pb_eval),
+                                DPCopulaGenerator(privacy = pb_eval)], cdf;
                                metrics = (fid = fidelity_score,), n_seeds = 3,
-                               privacy = pb_eval, rng = MersenneTwister(4))
+                               rng = MersenneTwister(4))
                 @test length(unique(r.generator for r in res3)) == 2
             end
 
@@ -1701,9 +1720,10 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
             end
 
             @testset "mixed public and private generators in one call" begin
-                res = compare([CopulaGenerator(), MSTGenerator()], cdf;
+                res = compare([CopulaGenerator(),
+                               MSTGenerator(privacy = pb_eval)], cdf;
                               metrics = (fid = fidelity_score,), n_seeds = 3,
-                              privacy = pb_eval, rng = MersenneTwister(6))
+                              rng = MersenneTwister(6))
                 @test length(res) == 2
                 @test all(r -> r.ok, res)
             end
@@ -2008,7 +2028,7 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
             @testset "basic sweep" begin
                 sweep_data = (; a = randn(200), b = rand(["x","y"], 200))
                 results = privacy_utility_sweep(
-                    DPCopulaGenerator(), sweep_data, [1.0, 10.0],
+                    DPCopulaGenerator, sweep_data, [1.0, 10.0],
                     fidelity_score;
                     rng = MersenneTwister(42)
                 )
@@ -2024,7 +2044,7 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
             @testset "works with jensen_shannon" begin
                 sweep_data = (; a = randn(200), b = rand(["x","y"], 200))
                 results = privacy_utility_sweep(
-                    DPCopulaGenerator(), sweep_data, [5.0],
+                    DPCopulaGenerator, sweep_data, [5.0],
                     jensen_shannon;
                     rng = MersenneTwister(42)
                 )
@@ -2035,11 +2055,22 @@ DataMimic._validate_privacy(::BoomGenerator, privacy) = nothing
             @testset "errors" begin
                 sweep_data = (; a = randn(100))
                 @test_throws ArgumentError privacy_utility_sweep(
-                    DPCopulaGenerator(), sweep_data, Float64[],
+                    DPCopulaGenerator, sweep_data, Float64[],
                     fidelity_score)
                 @test_throws ArgumentError privacy_utility_sweep(
-                    DPCopulaGenerator(), sweep_data, [-1.0],
+                    DPCopulaGenerator, sweep_data, [-1.0],
                     fidelity_score)
+
+                # A constructed generator has already fixed its ε, so
+                # sweeping it is meaningless rather than merely unsupported.
+                @test_throws ArgumentError privacy_utility_sweep(
+                    DPCopulaGenerator(ε = 1.0), sweep_data, [1.0],
+                    fidelity_score)
+
+                # And a constructor returning a public generator would give a
+                # flat curve that looks like a finding.
+                @test_throws ArgumentError privacy_utility_sweep(
+                    b -> CopulaGenerator(), sweep_data, [1.0], fidelity_score)
             end
         end
     end

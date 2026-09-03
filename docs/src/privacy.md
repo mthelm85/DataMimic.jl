@@ -6,7 +6,7 @@ and quietly providing no guarantee.
 
 ```julia
 budget = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
-model  = fit(MSTGenerator(), df; privacy = budget)
+model  = fit(MSTGenerator(privacy = budget), df)
 ```
 
 ## What the guarantee means
@@ -39,7 +39,7 @@ mechanisms — the naive ε-per-step accounting would be far more pessimistic.
   costs nothing further.
 - **[`DPCopulaGenerator`](@ref)** splits between the histogram marginals and
   the private covariance matrix.
-- **[`DiffusionGenerator`](@ref)`(dp = true)`** trains with DP-SGD —
+- **[`DiffusionGenerator`](@ref)`(privacy = budget)`** trains with DP-SGD —
   per-example gradient clipping plus Gaussian noise — accounted with Rényi DP
   over Poisson-subsampled minibatches. Per-example clipping is done by ghost
   clipping, which gets each example's gradient norm without a backward pass

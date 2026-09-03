@@ -145,7 +145,7 @@ being finite, rather than burning the remaining epochs on weights that can no
 longer recover. A lower `lr`, a smaller `batch_size`, or a narrower `d_layers`
 usually resolves it.
 
-**Privacy.** `dp = true` trains with DP-SGD and requires a budget; see
+**Privacy.** Passing a `privacy` budget trains with DP-SGD; see
 [Privacy](privacy.md).
 
 DP training is slower than ordinary training but no longer dramatically so.

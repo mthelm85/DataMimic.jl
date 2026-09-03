@@ -156,7 +156,7 @@ TabDDPM with optional DP-SGD. Requires the `LuxExt` package extension
 (activated by `using Lux`).
 """
 Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
-    dp::Bool           = false
+    privacy::Union{Nothing, PrivacyBudget} = nothing
     epochs::Int        = 100
     batch_size::Int    = 512
     hidden_dim::Int    = 0      # 0 = auto: min(256, max(64, 4·d_features))
@@ -186,10 +186,10 @@ Base.@kwdef struct DiffusionGenerator <: AbstractGenerator
 end
 ```
 
-> **Note on `DiffusionGenerator`:** it subtypes `AbstractGenerator` (not Public
-> or Private) because its `dp` flag determines privacy at fit time. The `fit`
-> method enforces: `dp == true` requires a `PrivacyBudget`; `dp == false`
-> rejects one.
+> **Note on `DiffusionGenerator`:** it subtypes `AbstractGenerator` (not
+> Public or Private) because it is the one engine that runs either way. The
+> presence of a `PrivacyBudget` selects DP-SGD; there is no separate `dp` flag
+> that could disagree with it, and nothing for `fit` to enforce.
 
 ### 2.4 Column Schema Hints
 
@@ -328,7 +328,6 @@ transform during sampling.
 function DataMimic.fit(
     generator::AbstractGenerator,
     table;
-    privacy::Union{Nothing, PrivacyBudget} = nothing,
     hints::Vector{ColumnHint}              = ColumnHint[],
     identifiers::Vector{Symbol}            = Symbol[],
     fill::Dict{Symbol, FillSpec}            = Dict{Symbol, FillSpec}(),
@@ -350,12 +349,10 @@ function DataMimic.fit(
      excluded.
 4. For each **non-identifier** column: detect type (or use `hints`), profile
    missingness, fit marginal.
-5. **Privacy / generator compatibility check:**
-   - `AbstractPublicGenerator` + `privacy !== nothing` → error.
-   - `AbstractPrivateGenerator` + `privacy === nothing` → error.
-   - `DiffusionGenerator(dp=true)` + `privacy === nothing` → error.
-   - `DiffusionGenerator(dp=false)` + `privacy !== nothing` → error.
-6. Fit the engine-specific model and return a concrete `AbstractFittedModel`.
+5. Fit the engine-specific model and return a concrete `AbstractFittedModel`.
+   The budget comes off the generator via `privacy_budget(generator)`, so
+   there is no compatibility step here: a private generator always carries
+   one, and a public generator has nowhere to put one.
 
 **Name-conflict note:** `DataMimic.fit` is a new function owned by this
 package — it is *not* `StatsBase.fit`. If a user has both loaded, they
@@ -726,7 +723,7 @@ depends on it so implementers know which papers to read for which phase.
   Differential Privacy." *CCS 2016*, pp. 308–318.
   — DP-SGD algorithm: per-sample gradient clipping + Gaussian noise
   injection. Also introduces the moments accountant for tight ε
-  composition. Used by `DiffusionGenerator(dp=true)`. `Phase 3`
+  composition. Used by `DiffusionGenerator(privacy = budget)`. `Phase 3`
 
 - **[Mironov 2017]** Mironov, I. "Rényi Differential Privacy." *CSF
   2017*, pp. 263–275.

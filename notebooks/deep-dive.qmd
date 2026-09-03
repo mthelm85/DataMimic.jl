@@ -235,9 +235,9 @@ and watch what each engine does about it.
 sub2 = adult[1:8000, [:age, :education_num, :hours_per_week, :workclass,
                       :occupation, :sex, :income]]
 
-function typed_score(gen, hint, priv)
+function typed_score(gen, hint)
     hints = hint === nothing ? ColumnHint[] : [hint]
-    m = fit(gen, sub2; hints = hints, privacy = priv, rng = MersenneTwister(3))
+    m = fit(gen, sub2; hints = hints, rng = MersenneTwister(3))
     sy = sample(m, nrow(sub2); rng = MersenneTwister(4))
     fidelity_score(sub2, sy).aggregate
 end
@@ -248,9 +248,8 @@ cases = [("detected correctly",              nothing),
 
 DataFrame(
     typing = first.(cases),
-    copula = [typed_score(CopulaGenerator(), h, nothing) for (_, h) in cases],
-    mst_eps1 = [typed_score(MSTGenerator(), h, PrivacyBudget(epsilon = 1.0))
-                for (_, h) in cases],
+    copula = [typed_score(CopulaGenerator(), h) for (_, h) in cases],
+    mst_eps1 = [typed_score(MSTGenerator(ε = 1.0), h) for (_, h) in cases],
 )
 ```
 
@@ -912,7 +911,7 @@ output, and the only way to learn what it costs on your data is to measure it.
 #| fig-cap: "The privacy–utility curve on German Credit. Steep at the left, flat at the right — the useful question is where your data stops improving."
 eps_grid2 = [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
 
-sweep = privacy_utility_sweep(MSTGenerator(), german, eps_grid2,
+sweep = privacy_utility_sweep(MSTGenerator, german, eps_grid2,
             (r, s) -> fidelity_score(r, s).aggregate;
             hints = credit_hint, rng = MersenneTwister(31))
 vals = [r.metric_result for r in sweep]
@@ -1036,8 +1035,7 @@ budget split evenly between them.
 ```{julia}
 #| code-fold: true
 #| code-summary: "Show the code"
-dpc = fit(DPCopulaGenerator(), wine;
-          privacy = PrivacyBudget(epsilon = 1.0), rng = MersenneTwister(51))
+dpc = fit(DPCopulaGenerator(ε = 1.0), wine; rng = MersenneTwister(51))
 dpc_syn = sample(dpc, nrow(wine); rng = MersenneTwister(52))
 
 DataFrame(engine = ["CopulaGenerator (no guarantee)", "DPCopulaGenerator (ε = 1)"],
@@ -1070,8 +1068,7 @@ MST takes the middle road: measure a chosen few.
 #| code-summary: "Show the code"
 # credit_amount needs the hint from section 2, or it is treated as an
 # identifier and dropped.
-mst_model = fit(MSTGenerator(), german; hints = credit_hint,
-                privacy = PrivacyBudget(epsilon = 1.0, delta = 1e-5),
+mst_model = fit(MSTGenerator(ε = 1.0, δ = 1e-5), german; hints = credit_hint,
                 rng = MersenneTwister(60))
 mst_syn = sample(mst_model, nrow(german); rng = MersenneTwister(61))
 first(mst_syn[:, [:checking_status, :duration_months, :purpose,
@@ -1177,18 +1174,18 @@ Two private engines, two datasets of opposite shape, the same budget each.
 #| code-fold: true
 #| code-summary: "Show the code"
 #| fig-cap: "The same two engines on two shapes of data, both at ε = 1. Each is better at exactly what the other is not."
-function fid(gen, df, priv, seed; hints = ColumnHint[])
-    m = fit(gen, df; hints = hints, privacy = priv, rng = MersenneTwister(seed))
+function fid(gen, df, seed; hints = ColumnHint[])
+    m = fit(gen, df; hints = hints, rng = MersenneTwister(seed))
     fidelity_score(df, sample(m, nrow(df); rng = MersenneTwister(seed + 1))).aggregate
 end
 
 b1 = PrivacyBudget(epsilon = 1.0)
 results = DataFrame(
     dataset = ["German Credit (14 categorical)", "Wine (11 continuous)"],
-    MST     = [fid(MSTGenerator(), german, b1, 62; hints = credit_hint),
-               fid(MSTGenerator(), wine, b1, 64)],
-    DPCopula = [fid(DPCopulaGenerator(), german, b1, 63; hints = credit_hint),
-                fid(DPCopulaGenerator(), wine, b1, 65)],
+    MST     = [fid(MSTGenerator(privacy = b1), german, 62; hints = credit_hint),
+               fid(MSTGenerator(privacy = b1), wine, 64)],
+    DPCopula = [fid(DPCopulaGenerator(privacy = b1), german, 63; hints = credit_hint),
+                fid(DPCopulaGenerator(privacy = b1), wine, 65)],
 )
 ```
 
@@ -1627,8 +1624,8 @@ different answers run to run.
 #| fig-cap: "Ten fits of the same engine on the same data, differing only in seed. Each dot is one run; the bar is the mean."
 function seed_spread(eps, seeds)
     [begin
-        m = fit(MSTGenerator(), german; hints = credit_hint,
-                privacy = PrivacyBudget(epsilon = eps), rng = MersenneTwister(s))
+        m = fit(MSTGenerator(ε = eps), german; hints = credit_hint,
+                rng = MersenneTwister(s))
         fidelity_score(german, sample(m, nrow(german); rng = MersenneTwister(s + 1))).aggregate
      end for s in seeds]
 end
@@ -1691,12 +1688,10 @@ whether any of that predicts what happens when you run them.
 function bench(df, target; hints = ColumnHint[], n = 4_000, seeds = 3)
     sub = df[1:min(n, nrow(df)), :]
     compare([CopulaGenerator(), CopulaGenerator(:gaussian),
-             MSTGenerator(), DPCopulaGenerator()], sub;
+             MSTGenerator(ε = 1.0), DPCopulaGenerator(ε = 1.0)], sub;
             metrics = (fidelity = (r, s) -> fidelity_score(r, s).aggregate,
-                       utility  = (r, s) -> utility_tstr(r, s, target;
-                                                rng = MersenneTwister(95)).ratio),
+                       utility  = utility_tstr(target; rng = MersenneTwister(95))),
             n_seeds = seeds, hints = hints,
-            privacy = PrivacyBudget(epsilon = 1.0),
             rng = MersenneTwister(96))
 end
 

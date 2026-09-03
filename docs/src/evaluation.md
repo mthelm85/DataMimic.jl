@@ -100,11 +100,10 @@ Note that DCR is O(n_synth × n_real): on large tables, evaluate on a subsample.
 ## Comparing engines
 
 ```julia
-compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator()], df;
+compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator(ε = 1.0)], df;
         metrics = (fidelity = fidelity_score,
-                   utility  = (r, s) -> utility_tstr(r, s, :income).ratio),
-        n_seeds = 5,
-        privacy = PrivacyBudget(epsilon = 1.0))
+                   utility  = utility_tstr(:income)),
+        n_seeds = 5)
 ```
 
 One row per generator and metric, carrying the mean and standard deviation

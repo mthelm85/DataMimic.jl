@@ -88,7 +88,7 @@ Papers and methods underpinning each engine and evaluation module.
   CCS 2016. [arXiv:1607.00133](https://arxiv.org/abs/1607.00133)
 
   Per-example gradient clipping + Gaussian noise addition. Used when
-  `DiffusionGenerator(dp=true)` is set.
+  `DiffusionGenerator` is given a `PrivacyBudget`.
 
 ### Rényi DP Accounting
 

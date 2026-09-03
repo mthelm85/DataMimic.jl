@@ -42,6 +42,7 @@ export save, load
 # Evaluation submodule
 using .Evaluate
 export Evaluate
+export privacy_budget
 export fidelity_score, privacy_dcr, utility_tstr
 export jensen_shannon, pairwise_marginal_error, privacy_utility_sweep
 export compare

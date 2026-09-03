@@ -67,7 +67,7 @@ Private engines require a `PrivacyBudget`; public engines reject one.
 ```julia
 budget = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
 
-model = fit(MSTGenerator(), df; privacy = budget)
+model = fit(MSTGenerator(privacy = budget), df)
 syn   = sample(model, 500)
 ```
 
@@ -105,7 +105,7 @@ A fill spec is one of:
 | Generator | Private | Notes |
 |---|---|---|
 | `CopulaGenerator(:beta \| :gaussian)` | no | Fast, and strong on mixed tables. Copula over numeric *and* categorical columns |
-| `DiffusionGenerator(; dp = false)` | optional | TabDDPM. Highest fidelity; `dp = true` enables DP-SGD |
+| `DiffusionGenerator()` | optional | TabDDPM. Highest fidelity; pass `privacy` to enable DP-SGD |
 | `MSTGenerator()` | yes | MST with Private-PGM reconciliation. Good on categorical-heavy data |
 | `DPCopulaGenerator()` | yes | DP histogram marginals + Analyze-Gauss private covariance |
 
@@ -140,7 +140,7 @@ syn   = sample(model, nrow(df))
 ### Fitting and sampling
 
 ```julia
-fit(generator, table; privacy = nothing, hints = ColumnHint[],
+fit(generator, table; hints = ColumnHint[],
                       identifiers = Symbol[], fill = Dict(),
                       rng = Random.default_rng())
 sample(model, n; rng = model.rng)
@@ -176,11 +176,10 @@ may not load across versions. A version header is written and checked.
 ### Comparing engines
 
 ```julia
-compare([CopulaGenerator(), MSTGenerator()], df;
+compare([CopulaGenerator(), MSTGenerator(ε = 1.0)], df;
         metrics = (fidelity = fidelity_score,
-                   utility  = (r, s) -> utility_tstr(r, s, :income).ratio),
-        n_seeds = 5,
-        privacy = PrivacyBudget(epsilon = 1.0))
+                   utility  = utility_tstr(:income)),
+        n_seeds = 5)
 ```
 
 Fits each generator, samples, and scores it — one row per generator/metric with

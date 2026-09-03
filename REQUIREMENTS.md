@@ -56,9 +56,9 @@ verified against the source.
 | **REQ-TYP-005** | `CopulaGenerator` shall accept a `copula_type::Symbol` parameter (`:beta` or `:gaussian`), defaulting to `:beta`. | Must | Done | 1 |
 | **REQ-TYP-006** | IF `CopulaGenerator` is constructed with a `copula_type` other than `:beta` or `:gaussian`, THEN the constructor shall throw `ArgumentError`. | Must | Done | 1 |
 | **REQ-TYP-007** | `AutoGenerator` shall subtype `AbstractGenerator` and carry no configuration fields. | Must | Removed | 1 |
-| **REQ-TYP-008** | `MSTGenerator` shall subtype `AbstractPrivateGenerator` and take no configuration — marginal order is fixed by the algorithm, not chosen by the caller (see REQ-MST-007). | Must | Done | 2 |
+| **REQ-TYP-008** | `MSTGenerator` shall subtype `AbstractPrivateGenerator` and carry exactly one setting, its `PrivacyBudget`. Marginal order is fixed by the algorithm, not chosen by the caller (see REQ-MST-007). | Must | Done | 2 |
 | **REQ-TYP-009** | `DPCopulaGenerator` shall subtype `AbstractPrivateGenerator` with no configuration fields. | Must | Done | 2 |
-| **REQ-TYP-010** | `DiffusionGenerator` shall subtype `AbstractGenerator` (not Public or Private) and accept `dp::Bool`, `epochs::Int`, `batch_size::Int`, `hidden_dim::Int`, `n_blocks::Int`, `embed_dim::Int`, `dropout::Float64`, `lr::Float64`, `lr_warmup::Int`. | Must | Done | 3 |
+| **REQ-TYP-010** | `DiffusionGenerator` shall subtype `AbstractGenerator` (not Public or Private) and accept `privacy::Union{Nothing, PrivacyBudget}`, `epochs::Int`, `batch_size::Int`, `hidden_dim::Int`, `n_blocks::Int`, `embed_dim::Int`, `dropout::Float64`, `lr::Float64`, `lr_warmup::Int`. | Must | Done | 3 |
 | **REQ-TYP-011** | `ColumnHint` shall accept `name::Symbol`, `kind::Symbol`, and optional `levels::Vector`. | Must | Done | 1 |
 | **REQ-TYP-012** | Valid `ColumnHint` `kind` values shall be `:continuous`, `:integer`, `:categorical`, `:binary`, `:constant`, `:identifier`. | Must | Done | 1 |
 
@@ -72,10 +72,10 @@ verified against the source.
 | **REQ-PRV-002** | `PrivacyBudget` shall default `delta` to `1e-5`. | Must | Done | 1 |
 | **REQ-PRV-003** | IF `epsilon ≤ 0`, THEN `PrivacyBudget` construction shall throw `ArgumentError`. | Must | Done | 1 |
 | **REQ-PRV-004** | IF `delta < 0` or `delta ≥ 1`, THEN `PrivacyBudget` construction shall throw `ArgumentError`. | Must | Done | 1 |
-| **REQ-PRV-005** | WHEN `fit()` is called with an `AbstractPublicGenerator` and `privacy !== nothing`, the system shall throw `ArgumentError` with message naming the generator and advising to use a private generator or remove the budget. | Should | Done | 1 |
-| **REQ-PRV-006** | WHEN `fit()` is called with an `AbstractPrivateGenerator` and `privacy === nothing`, the system shall throw `ArgumentError` naming the generator and stating it requires a `PrivacyBudget`. | Must | Done | 2 |
-| **REQ-PRV-007** | WHEN `fit()` is called with `DiffusionGenerator(dp=true)` and `privacy === nothing`, the system shall throw `ArgumentError`. | Must | Done | 3 |
-| **REQ-PRV-008** | WHEN `fit()` is called with `DiffusionGenerator(dp=false)` and `privacy !== nothing`, the system shall throw `ArgumentError`. | Must | Done | 3 |
+| **REQ-PRV-005** | An `AbstractPublicGenerator` shall have nowhere to carry a `PrivacyBudget`, so supplying one is a dispatch failure at construction rather than a check inside `fit()`. | Should | Done | 1 |
+| **REQ-PRV-006** | An `AbstractPrivateGenerator` shall require a `PrivacyBudget` at construction, throwing `ArgumentError` naming the generator and showing the fix. A private generator without a budget shall be unrepresentable rather than rejected later. | Must | Done | 2 |
+| **REQ-PRV-007** | ~~WHEN `fit()` is called with `DiffusionGenerator(dp=true)` and `privacy === nothing`, the system shall throw `ArgumentError`.~~ Withdrawn: the `dp` flag is gone. A budget's presence is what selects DP-SGD, so the state this guarded cannot be constructed. | Must | Removed | 3 |
+| **REQ-PRV-008** | ~~WHEN `fit()` is called with `DiffusionGenerator(dp=false)` and `privacy !== nothing`, the system shall throw `ArgumentError`.~~ Withdrawn with REQ-PRV-007, for the same reason. | Must | Removed | 3 |
 
 ---
 
@@ -120,7 +120,7 @@ verified against the source.
 
 | ID | Requirement | MoSCoW | Status | Phase |
 |----|-------------|--------|--------|-------|
-| **REQ-FIT-001** | `fit()` shall accept the positional arguments `(generator::AbstractGenerator, table)` and keyword arguments `privacy`, `hints`, `identifiers`, `fill`, `rng`. | Must | Done | 1 |
+| **REQ-FIT-001** | `fit()` shall accept the positional arguments `(generator::AbstractGenerator, table)` and keyword arguments `hints`, `identifiers`, `fill`, `rng`. The privacy budget is carried by the generator, not by this call. | Must | Done | 1 |
 | **REQ-FIT-002** | IF the input table has zero rows, THEN `fit()` shall throw `ArgumentError`. | Must | Done | 1 |
 | **REQ-FIT-003** | IF the input table has zero columns, THEN `fit()` shall throw `ArgumentError`. | Must | Done | 1 |
 | **REQ-FIT-004** | `fit()` shall profile the missingness rate (fraction of `missing` values) for each non-identifier column. | Must | Done | 1 |
@@ -383,8 +383,8 @@ which governs extension loading rather than dispatch, remains in force.
 | **REQ-DIF-002** | `DiffusionGenerator` shall use Gaussian diffusion for numerical features \[Ho et al. 2020\], with the ε parametrization, an MSE objective, and a cosine β schedule \[Nichol & Dhariwal 2021\]. | Must | Done | 3 |
 | **REQ-DIF-003** | `DiffusionGenerator` shall use multinomial diffusion for categorical features \[Hoogeboom et al. 2021\], carrying categorical state in log space and training against the stochastic variational bound (`L_t / p_t + KL_prior`, normalized by the number of categorical features) under the `x0` parametrization. | Must | Done | 3 |
 | **REQ-DIF-004** | `DiffusionGenerator` shall use the TabDDPM `MLPDiffusion` backbone: a plain MLP of `Dense → ReLU → Dropout` blocks (no normalization, no residual connections) with a sinusoidal timestep embedding added once at the input projection. | Must | Done | 3 |
-| **REQ-DIF-005** | WHEN `dp=true`, `DiffusionGenerator` shall train using DP-SGD with per-sample gradient clipping and Gaussian noise injection \[Abadi et al. 2016\]. Lots shall be drawn by **Poisson subsampling** — each record included independently with probability `q = batch_size / n`, giving variable (possibly empty) lot sizes — so that the sampling mechanism matches the one the accountant models, and both the gradient average and the noise scale shall be normalized by the *expected* lot size `q · n` rather than the realized one. | Must | Done | 3 |
-| **REQ-DIF-006** | WHILE `dp=true`, `DiffusionGenerator` shall track cumulative privacy spend via Rényi DP accounting for the Poisson-subsampled Gaussian mechanism \[Mironov 2017\], \[Mironov et al. 2019\]. The reported ε shall be a valid **upper bound** on the true spend: the closed-form RDP is exact at each integer order, but the order search is over a finite integer grid and the RDP → (ε, δ) conversion is the standard \[Mironov 2017, Prop. 3\] bound, both of which err conservatively. | Must | Done | 3 |
+| **REQ-DIF-005** | WHEN a `PrivacyBudget` is supplied, `DiffusionGenerator` shall train using DP-SGD with per-sample gradient clipping and Gaussian noise injection \[Abadi et al. 2016\]. Lots shall be drawn by **Poisson subsampling** — each record included independently with probability `q = batch_size / n`, giving variable (possibly empty) lot sizes — so that the sampling mechanism matches the one the accountant models, and both the gradient average and the noise scale shall be normalized by the *expected* lot size `q · n` rather than the realized one. | Must | Done | 3 |
+| **REQ-DIF-006** | WHILE training under a `PrivacyBudget`, `DiffusionGenerator` shall track cumulative privacy spend via Rényi DP accounting for the Poisson-subsampled Gaussian mechanism \[Mironov 2017\], \[Mironov et al. 2019\]. The reported ε shall be a valid **upper bound** on the true spend: the closed-form RDP is exact at each integer order, but the order search is over a finite integer grid and the RDP → (ε, δ) conversion is the standard \[Mironov 2017, Prop. 3\] bound, both of which err conservatively. | Must | Done | 3 |
 | **REQ-DIF-007** | `DiffusionGenerator` shall be implemented as a Lux.jl package extension (`LuxExt`). | Must | Done | 3 |
 | **REQ-DIF-008** | IF `DiffusionGenerator` is requested and `Lux.jl` is not loaded, THEN `fit()` shall throw `ErrorException` with the message `"DiffusionGenerator requires Lux.jl. Run \`using Lux\` before calling fit."`. | Must | Done | 3 |
 | **REQ-DIF-009** | The `LuxExt` shall use `AutoZygote()` as the initial AD backend, with the architecture structured so switching to `AutoEnzyme()` is a single-token change. | Must | Done | 3 |
@@ -430,7 +430,7 @@ which governs extension loading rather than dispatch, remains in force.
 | **REQ-EVL-011** | `jensen_shannon` shall return a `NamedTuple` containing per-column JSD scores, the mean, and an aggregate. JSD values shall be bounded in \[0, log(2)\]. | Must | Done | 4b |
 | **REQ-EVL-012** | `pairwise_marginal_error(real, synth; order=2)` shall discretize all columns and compute Total Variation Distance over every `order`-way joint distribution. | Must | Done | 4b |
 | **REQ-EVL-013** | `pairwise_marginal_error` shall return a `NamedTuple` containing per-pair TVD scores, the mean, and the worst-case pair. | Must | Done | 4b |
-| **REQ-EVL-014** | `privacy_utility_sweep(generator, table, epsilons, metric_fn; kw...)` shall fit and sample at each ε, evaluate with `metric_fn`, and return a vector of `(; epsilon, metric_result)` tuples. | Must | Done | 4b |
+| **REQ-EVL-014** | `privacy_utility_sweep(make_generator, table, epsilons, metric_fn; kw...)` shall build a generator per ε, fit and sample, evaluate with `metric_fn`, and return a vector of `(; epsilon, metric_result)` tuples. `make_generator` is anything callable with a `PrivacyBudget` — a private generator's type already is. A budget belongs to a generator, so a sweep over ε needs a constructor rather than an instance whose ε is fixed. | Must | Done | 4b |
 | **REQ-EVL-015** | `privacy_utility_sweep` shall accept any `metric_fn(real, synth)` that returns a `NamedTuple`, including `fidelity_score`, `jensen_shannon`, and user-defined functions. | Must | Done | 4b |
 
 ---
@@ -484,14 +484,15 @@ Counted from the rows above.
 
 | MoSCoW | Count |     | Status | Count |
 |--------|-------|-----|--------|-------|
-| **Must** | 129 |   | **Done** | 130 |
+| **Must** | 129 |   | **Done** | 128 |
 | **Should** | 11 |  | **Partial** | 0 |
-| **Could** | 2 |    | **Removed** | 12 |
+| **Could** | 2 |    | **Removed** | 14 |
 | **Total** | 142 |  | **Total** | 142 |
 
-No rows are *Partial*. The 12 *Removed* rows are the withdrawn
+No rows are *Partial*. The 14 *Removed* rows are the withdrawn
 `AutoGenerator` dispatch (§9) plus its type and `fit` requirements,
-REQ-TYP-007 and REQ-FIT-010, and REQ-MST-007, whose premise was wrong rather
-than unimplemented.
+REQ-TYP-007 and REQ-FIT-010; REQ-MST-007, whose premise was wrong rather than
+unimplemented; and REQ-PRV-007/008, which guarded a `DiffusionGenerator`
+state that no longer exists now that a budget's presence selects DP-SGD.
 
 **Gaps found**: 14 (11 resolved, 3 open design decisions).

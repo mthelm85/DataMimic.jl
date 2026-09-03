@@ -205,13 +205,13 @@ function build_cases()
 
     # Private engines.
     push!(cs, Case("mst/fit", "engines",
-        () -> fit(MSTGenerator(), TBL_MED; privacy = BUDGET, rng = RNG()), reps = 3))
-    let m = fit(MSTGenerator(), TBL_MED; privacy = BUDGET, rng = RNG())
+        () -> fit(MSTGenerator(privacy = BUDGET), TBL_MED; rng = RNG()), reps = 3))
+    let m = fit(MSTGenerator(privacy = BUDGET), TBL_MED; rng = RNG())
         push!(cs, Case("mst/sample_20k", "engines",
             () -> sample(m, 20_000; rng = RNG())))
     end
     push!(cs, Case("dpcopula/fit", "engines",
-        () -> fit(DPCopulaGenerator(), TBL_MED; privacy = BUDGET, rng = RNG()), reps = 3))
+        () -> fit(DPCopulaGenerator(privacy = BUDGET), TBL_MED; rng = RNG()), reps = 3))
 
     # High-cardinality categoricals: MST's cost is quadratic in level count,
     # and no other case here has a column wider than 42 levels. Domain
@@ -221,8 +221,8 @@ function build_cases()
     # 0.18s with it on. A regression here is therefore as likely to mean
     # compression stopped firing as that something got slower.
     push!(cs, Case("mst/fit_hicard", "engines",
-        () -> fit(MSTGenerator(), TBL_HICARD; privacy = BUDGET, rng = RNG()), reps = 3))
-    let m = fit(MSTGenerator(), TBL_HICARD; privacy = BUDGET, rng = RNG())
+        () -> fit(MSTGenerator(privacy = BUDGET), TBL_HICARD; rng = RNG()), reps = 3))
+    let m = fit(MSTGenerator(privacy = BUDGET), TBL_HICARD; rng = RNG())
         push!(cs, Case("mst/sample_hicard_20k", "engines",
             () -> sample(m, 20_000; rng = RNG()), reps = 3))
     end
@@ -267,11 +267,11 @@ function build_cases()
     # training per epoch. Ghost clipping brought it within a small multiple of
     # the ordinary path, so it runs by default — and this case is what would
     # catch a regression back to per-example gradients.
-    let g = DiffusionGenerator(; dp = true, epochs = 2, batch_size = 1024,
+    let g = DiffusionGenerator(; privacy = PrivacyBudget(epsilon = 10.0),
+                               epochs = 2, batch_size = 1024,
                                d_layers = [256, 256], num_timesteps = 100)
         push!(cs, Case("diffusion/fit_dpsgd_2ep", "diffusion",
-            () -> fit(g, TBL_MED; privacy = PrivacyBudget(epsilon = 10.0), rng = RNG()),
-            reps = 3))
+            () -> fit(g, TBL_MED; rng = RNG()), reps = 3))
     end
 
     # Evaluation metrics — cheap individually, but `compare` calls them once

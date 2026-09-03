@@ -103,7 +103,7 @@ say("-"^62)
 for eps in (0.5, 1.0, 2.0, 4.0, 8.0)
     pb = PrivacyBudget(epsilon = eps, delta = 1e-5)
     t0 = time()
-    model = fit(MSTGenerator(), df; privacy = pb, rng = MersenneTwister(42))
+    model = fit(MSTGenerator(privacy = pb), df; rng = MersenneTwister(42))
     t_fit = time() - t0
 
     synth = sample(model, nrow(df); rng = MersenneTwister(7))

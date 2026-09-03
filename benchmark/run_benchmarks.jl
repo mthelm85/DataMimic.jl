@@ -158,8 +158,7 @@ function benchmark_adult()
     # ── MSTGenerator (ε = 1.0) ─────────────────────────────────────────
     print_header("Adult × MSTGenerator (ε = 1.0)")
     t = @elapsed begin
-        model = fit(MSTGenerator(), df;
-                    privacy = PrivacyBudget(; epsilon = 1.0),
+        model = fit(MSTGenerator(ε = 1.0), df;
                     rng = copy(rng))
         synth = DataMimic.sample(model, n)
     end
@@ -170,8 +169,7 @@ function benchmark_adult()
     # ── DPCopulaGenerator (ε = 1.0) ───────────────────────────────────
     print_header("Adult × DPCopulaGenerator (ε = 1.0)")
     t = @elapsed begin
-        model = fit(DPCopulaGenerator(), df;
-                    privacy = PrivacyBudget(; epsilon = 1.0),
+        model = fit(DPCopulaGenerator(ε = 1.0), df;
                     rng = copy(rng))
         synth = DataMimic.sample(model, n)
     end
@@ -193,7 +191,7 @@ function benchmark_adult()
     print_header("Adult × MSTGenerator — Privacy-Utility Sweep")
     epsilons = [0.1, 0.5, 1.0, 5.0, 10.0]
     sweep = privacy_utility_sweep(
-        MSTGenerator(), df, epsilons, fidelity_score;
+        MSTGenerator, df, epsilons, fidelity_score;
         rng = copy(rng))
 
     println("\n  ε         │ Fidelity Aggregate")
@@ -231,8 +229,7 @@ function benchmark_covertype()
     # ── MSTGenerator (ε = 1.0) ─────────────────────────────────────────
     print_header("Covertype(10k) × MSTGenerator (ε = 1.0)")
     t = @elapsed begin
-        model = fit(MSTGenerator(), df;
-                    privacy = PrivacyBudget(; epsilon = 1.0),
+        model = fit(MSTGenerator(ε = 1.0), df;
                     rng = copy(rng))
         synth = DataMimic.sample(model, n)
     end
@@ -243,8 +240,7 @@ function benchmark_covertype()
     # ── DPCopulaGenerator (ε = 1.0) ───────────────────────────────────
     print_header("Covertype(10k) × DPCopulaGenerator (ε = 1.0)")
     t = @elapsed begin
-        model = fit(DPCopulaGenerator(), df;
-                    privacy = PrivacyBudget(; epsilon = 1.0),
+        model = fit(DPCopulaGenerator(ε = 1.0), df;
                     rng = copy(rng))
         synth = DataMimic.sample(model, n)
     end

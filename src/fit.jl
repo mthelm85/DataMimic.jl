@@ -1,32 +1,18 @@
-# ─── Privacy Validation ──────────────────────────────────────────────────────
+# ─── Privacy ─────────────────────────────────────────────────────
+#
+# The budget lives on the generator, so there is nothing to validate here: a
+# private generator cannot be constructed without one, and a public generator
+# has nowhere to put one. This used to be three `_validate_privacy` methods
+# checking at fit time what the type system can check at construction time.
 
-function _validate_privacy(gen::AbstractPublicGenerator, privacy)
-    if privacy !== nothing
-        name = nameof(typeof(gen))
-        throw(ArgumentError(
-            "$name does not support privacy; " *
-            "use a private generator or remove the privacy budget."))
-    end
-end
+"""
+    privacy_budget(generator) -> Union{Nothing, PrivacyBudget}
 
-function _validate_privacy(gen::AbstractPrivateGenerator, privacy)
-    if privacy === nothing
-        name = nameof(typeof(gen))
-        throw(ArgumentError("$name requires a PrivacyBudget."))
-    end
-end
-
-function _validate_privacy(gen::DiffusionGenerator, privacy)
-    if gen.dp && privacy === nothing
-        throw(ArgumentError(
-            "DiffusionGenerator with dp=true requires a PrivacyBudget."))
-    end
-    if !gen.dp && privacy !== nothing
-        throw(ArgumentError(
-            "DiffusionGenerator with dp=false does not support privacy; " *
-            "set dp=true or remove the privacy budget."))
-    end
-end
+The budget a generator will spend, or `nothing` for a non-private one.
+"""
+privacy_budget(::AbstractPublicGenerator) = nothing
+privacy_budget(gen::AbstractPrivateGenerator) = gen.privacy
+privacy_budget(gen::DiffusionGenerator) = gen.privacy
 
 # ─── Main fit ────────────────────────────────────────────────────────────────
 
@@ -36,14 +22,12 @@ end
 Fit a synthetic data model to `table` using the specified generator.
 
 # Keywords
-- `privacy::Union{Nothing, PrivacyBudget}=nothing` — required for private generators
 - `hints::Vector{ColumnHint}=ColumnHint[]` — column type overrides
 - `identifiers::Vector{Symbol}=Symbol[]` — columns to exclude from the model
 - `fill=Dict{Symbol,FillSpec}()` — fill specs for identifier columns in output
 - `rng::AbstractRNG=Random.default_rng()` — random number generator
 """
 function fit(gen::AbstractGenerator, table;
-             privacy::Union{Nothing, PrivacyBudget} = nothing,
              hints::Vector{ColumnHint}              = ColumnHint[],
              identifiers::Vector{Symbol}            = Symbol[],
              fill                                   = Dict{Symbol, FillSpec}(),
@@ -105,13 +89,14 @@ function fit(gen::AbstractGenerator, table;
         fill_dict[sk] = v
     end
 
-    # ── 6. Validate privacy / generator compatibility ────────────────────
-    _validate_privacy(gen, privacy)
-
-    # ── 7. Dispatch to engine ────────────────────────────────────────────
+    # ── 6. Dispatch to engine ────────────────────────────────────────────
+    #
+    # The budget comes off the generator rather than off this call, so there
+    # is no compatibility to check: a private generator always has one and a
+    # public generator never does.
     return _fit_engine(gen, cols, col_names, id_set, fill_dict,
                        hints, nm_cache, basetype_cache, nrows, mat, rng,
-                       privacy)
+                       privacy_budget(gen))
 end
 
 # ─── CopulaGenerator engine integration ─────────────────────────────────────
