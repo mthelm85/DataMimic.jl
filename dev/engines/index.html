@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Engines — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=458b5a94">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=c1f09228">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -140,7 +140,7 @@ model = fit(gen, df)</code></pre>
 <h2 id="MSTGenerator" class="md-heading">MSTGenerator<a href="#MSTGenerator" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">MSTGenerator(ε = 1.0)          # or MSTGenerator(privacy = budget)</code></pre>
+<pre><code class="language-julia">MSTGenerator(ε = 1.0)              # or MSTGenerator(privacy = budget)</code></pre>
 </div>
 <p>MST won the NIST differential privacy synthetic data challenge, and it is built around a simple observation: you cannot afford to measure everything privately, so spend the budget on the relationships that matter most.</p>
 <p><strong>How it works.</strong></p>
@@ -173,7 +173,7 @@ model = fit(gen, df)</code></pre>
 <h2 id="DPCopulaGenerator" class="md-heading">DPCopulaGenerator<a href="#DPCopulaGenerator" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">DPCopulaGenerator(ε = 1.0)</code></pre>
+<pre><code class="language-julia">DPCopulaGenerator(ε = 1.0)         # or DPCopulaGenerator(privacy = budget)</code></pre>
 </div>
 <p>The copula idea again, with both halves made private: differentially private histogram marginals combined with a differentially private covariance matrix, assembled into a Gaussian copula.</p>
 <p><strong>How it works.</strong> Each column&#39;s marginal is estimated as a histogram with Gaussian noise added to the counts. The dependence structure comes from a private covariance matrix estimated by the Analyze-Gauss mechanism, which adds symmetric Gaussian noise to the second-moment matrix — symmetric because the matrix is symmetric, and noising the two triangles independently would give the off-diagonal entries half the intended variance. Sampling draws from the resulting Gaussian copula and inverts the noisy marginals.</p>
@@ -206,6 +206,6 @@ model = fit(gen, df)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=458b5a94"></script>
+  <script src="../assets/materialdocs.js?v=c1f09228"></script>
 </body>
 </html>
