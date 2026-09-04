@@ -106,8 +106,8 @@ A fill spec is one of:
 |---|---|---|
 | `CopulaGenerator(:beta \| :gaussian)` | no | Fast, and strong on mixed tables. Copula over numeric *and* categorical columns |
 | `DiffusionGenerator()` | optional | TabDDPM. Highest fidelity; pass `privacy` to enable DP-SGD |
-| `MSTGenerator()` | yes | MST with Private-PGM reconciliation. Good on categorical-heavy data |
-| `DPCopulaGenerator()` | yes | DP histogram marginals + Analyze-Gauss private covariance |
+| `MSTGenerator(ε = 1.0)` | yes | MST with Private-PGM reconciliation. Good on categorical-heavy data |
+| `DPCopulaGenerator(ε = 1.0)` | yes | DP histogram marginals + Analyze-Gauss private covariance |
 
 ### Choosing one
 

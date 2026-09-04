@@ -65,11 +65,15 @@ you want speed, and read the result as being about that smaller dataset.
 
 # Example
 ```julia
-compare([CopulaGenerator(), CopulaGenerator(:gaussian)], df;
+compare([CopulaGenerator(), MSTGenerator(ε = 0.5), MSTGenerator(ε = 4.0)], df;
         metrics = (fidelity = fidelity_score,
-                   utility  = (r, s) -> utility_tstr(r, s, :income).ratio),
+                   utility  = utility_tstr(:income)),
         n_seeds = 5)
 ```
+
+Each generator carries its own budget, so one call can compare an engine at
+several ε. A metric needing more than `(real, synth)` has a partially applied
+form, so no wrapper function is required.
 """
 function compare(generators, table;
                  metrics = (fidelity = fidelity_score,

@@ -78,7 +78,7 @@ Rather than adopting a convention, measure what a budget costs on your data:
 
 ```julia
 privacy_utility_sweep(
-    MSTGenerator(), df, [0.5, 1.0, 2.0, 4.0, 8.0],
+    MSTGenerator, df, [0.5, 1.0, 2.0, 4.0, 8.0],
     (real, synth) -> fidelity_score(real, synth).aggregate,
 )
 ```
