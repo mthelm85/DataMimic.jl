@@ -46,7 +46,6 @@ load
 ## Privacy
 
 ```@docs
-PrivacyBudget
 privacy_budget
 ```
 
