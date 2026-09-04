@@ -52,14 +52,26 @@ Dependence between categorical and numeric columns is therefore modelled rather
 than discarded.
 
 Two consequences are worth knowing. The association a copula can express is
-monotone in the level ordering, which is arbitrary for a nominal variable, so
-this captures a real part of the dependence but not all of it. And the two
-copula families differ sharply here: `:beta` is nonparametric and can represent
-the non-monotone structure an arbitrary ordering produces, while `:gaussian` is
-restricted to a single correlation matrix and cannot. On the Adult dataset the
-train-on-synthetic utility ratio is about 0.99 for `:beta` against 0.66 for
-`:gaussian`. Prefer the default unless you specifically want a Gaussian
-dependence structure.
+**monotone in the level ordering**, so that ordering matters. Levels are
+sorted, which is the meaningful order for an ordinal column — a grade band, a
+survey scale, a zero-padded code — and an arbitrary but stable one for a
+nominal column, where no order is better than another. Sorting is not
+cosmetic: on a synthetic ordinal column correlated 0.99 with a numeric one,
+`:gaussian` recovered 0.13 when levels came back in hash order and 0.94 once
+sorted.
+
+The two copula families still differ sharply here. `:beta` is nonparametric
+and can represent non-monotone structure, so it is far more forgiving of a
+level order that does not match the data; `:gaussian` is restricted to a
+single correlation matrix and can only use the order it is given. On the Adult
+dataset the train-on-synthetic utility ratio is about 0.99 for `:beta` against
+0.66 for `:gaussian`. Prefer the default unless you specifically want a
+Gaussian dependence structure.
+
+If a column is ordinal but does not sort into its natural order — `"low"`,
+`"medium"`, `"high"` sorts alphabetically — pass the order explicitly with
+`ColumnHint(name = :size, kind = :categorical, levels = ["low", "medium",
+"high"])`.
 
 `:gaussian` carries one further restriction. It estimates a correlation matrix
 and factorizes it, and that factorization fails when the modelled columns are

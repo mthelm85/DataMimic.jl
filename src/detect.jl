@@ -105,3 +105,28 @@ function _classify_numeric_cardinality(n_unique::Int, n::Int)
     n_unique ≤ threshold && return :categorical
     return :integer
 end
+
+"""
+Levels of a categorical marginal, in a defined order.
+
+`countmap` returns a `Dict`, so `collect(keys(...))` is hash order. That
+matters because the copula encodes a categorical through its level CDF, and
+the association a copula can express is monotone in that order: an arbitrary
+order is an arbitrary axis. For a genuinely nominal column any fixed order is
+as good as another, but for an ordinal one - a grade band, a survey scale, a
+zero-padded code - sorting is the meaningful order and hash order destroys it.
+Measured on a synthetic ordinal column whose true correlation with a numeric
+column was 0.99, `CopulaGenerator(:gaussian)` recovered 0.13 in hash order.
+
+`MSTGenerator` has always sorted (`_discretize_column`); this brings the
+copulas in line. Types with no ordering fall back to hash order rather than
+failing.
+"""
+function _ordered_levels(cm::AbstractDict)
+    ks = collect(keys(cm))
+    return try
+        sort(ks)
+    catch
+        ks
+    end
+end

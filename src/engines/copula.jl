@@ -31,8 +31,16 @@ function _fit_marginal(nm::Vector, kind::Symbol, T::Type;
         else
             cm = StatsBase.countmap(nm)
         end
-        lvls  = collect(keys(cm))
-        probs = Float64.(collect(values(cm)))
+        # An explicit `levels` hint IS an ordering - that is most of why a
+        # caller passes one, for an ordinal column that does not sort into its
+        # natural order ("low", "medium", "high"). Honour it; sort only when
+        # choosing the order ourselves. `_discretize_column` already does this.
+        lvls = if hint !== nothing && hint.levels !== nothing
+            [l for l in hint.levels if haskey(cm, l)]
+        else
+            _ordered_levels(cm)
+        end
+        probs = Float64[cm[l] for l in lvls]
         probs ./= sum(probs)
         return CategoricalMarginal(lvls, probs)
     end

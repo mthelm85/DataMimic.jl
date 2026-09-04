@@ -63,8 +63,14 @@ function _fit_dp_marginal(nm::Vector, kind::Symbol, T::Type,
         cm = StatsBase.countmap(nm)
     end
 
-    lvls   = collect(keys(cm))
-    counts = Float64.(collect(values(cm)))
+    # As in `_fit_marginal`: an explicit `levels` hint carries an ordering,
+    # so it wins over sorting.
+    lvls = if hint !== nothing && hint.levels !== nothing
+        [l for l in hint.levels if haskey(cm, l)]
+    else
+        _ordered_levels(cm)
+    end
+    counts = Float64[cm[l] for l in lvls]
 
     sigma = _rho_to_sigma(rho, 1.0)
     counts .+= randn(rng, length(counts)) .* sigma

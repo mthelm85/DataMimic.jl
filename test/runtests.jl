@@ -576,6 +576,61 @@ DataMimic.privacy_budget(::BoomGenerator) = nothing
         @test all(==("only"), syn.flat)
     end
 
+    @testset "categorical levels are ordered, not hash-ordered" begin
+        # A copula encodes a categorical through its level CDF, so the
+        # association it can express is monotone in the level ORDER. Levels
+        # used to come from collect(keys(countmap(...))) - Dict hash order -
+        # which is an arbitrary axis. For a nominal column that is harmless;
+        # for an ordinal one it destroys the association. Measured on the
+        # table below, :gaussian recovered 0.13 of a true 0.99 correlation in
+        # hash order, and 0.94 once sorted.
+        label(i) = "L" * lpad(i, 2, '0')
+        rng = MersenneTwister(21)
+        n = 1500
+        lvl = rand(rng, 1:10, n)
+        df = DataFrame(grade  = label.(lvl),
+                       salary = 30_000 .+ 4_000 .* lvl .+ randn(rng, n) .* 1_500,
+                       noise  = randn(rng, n))
+        rank_of(v) = [parse(Int, x[2:end]) for x in v]
+
+        m = fit(CopulaGenerator(), df; rng = MersenneTwister(22))
+        @test issorted(m.marginals[:grade].levels)
+
+        # The ordinal association must survive, on the engine that cannot
+        # represent a scrambled order.
+        mg = fit(CopulaGenerator(:gaussian), df; rng = MersenneTwister(23))
+        @test issorted(mg.marginals[:grade].levels)
+        sg = sample(mg, n; rng = MersenneTwister(24))
+        @test cor(rank_of(sg.grade), sg.salary) > 0.8
+
+        # Probabilities must follow their levels through the sort, or the
+        # marginal itself would be wrong.
+        cm = Dict(l => count(==(l), df.grade) for l in unique(df.grade))
+        for (i, l) in enumerate(m.marginals[:grade].levels)
+            @test m.marginals[:grade].probs[i] ≈ cm[l] / n
+        end
+
+        # A type with no `isless` must fall back to hash order rather than
+        # throwing - sorting is a nicety, not a requirement.
+        unordered = Dict((1, "x") => 2, (2, "y") => 3)
+        @test length(DataMimic._ordered_levels(unordered)) == 2
+
+        # An explicit `levels` hint IS an ordering, and must beat sorting -
+        # "low"/"medium"/"high" is the case sorting cannot get right, and it
+        # is most of the reason to pass levels at all.
+        ord = DataFrame(size = rand(MersenneTwister(27), ["low", "medium", "high"], 300),
+                        v = randn(MersenneTwister(28), 300))
+        want = ["low", "medium", "high"]
+        hinted = fit(CopulaGenerator(), ord;
+                     hints = [ColumnHint(name = :size, kind = :categorical,
+                                         levels = want)],
+                     rng = MersenneTwister(29))
+        @test hinted.marginals[:size].levels == want
+
+        unhinted = fit(CopulaGenerator(), ord; rng = MersenneTwister(29))
+        @test issorted(unhinted.marginals[:size].levels)
+    end
+
     @testset "singular correlation is repaired, not thrown" begin
         # The Gaussian copula factorizes the correlation of the normal scores.
         # Collinear columns, or fewer complete cases than columns, make that
