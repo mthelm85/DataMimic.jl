@@ -14,6 +14,14 @@ privacy_budget(::AbstractPublicGenerator) = nothing
 privacy_budget(gen::AbstractPrivateGenerator) = gen.privacy
 privacy_budget(gen::DiffusionGenerator) = gen.privacy
 
+# The same question, asked of a fitted model. A model that cannot say what
+# guarantee it carries is hard to act on once it outlives the session that
+# produced it - `save` makes that permanent.
+privacy_budget(::FittedCopulaModel) = nothing
+privacy_budget(m::FittedMSTModel) = m.privacy
+privacy_budget(m::FittedDPCopulaModel) = m.privacy
+privacy_budget(m::FittedDiffusionModel) = m.privacy
+
 # ─── Main fit ────────────────────────────────────────────────────────────────
 
 """

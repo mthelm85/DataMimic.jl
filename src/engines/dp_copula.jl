@@ -308,7 +308,7 @@ function _fit_engine(gen::DPCopulaGenerator, cols, col_names, id_set,
 
     return FittedDPCopulaModel(
         col_names, col_kinds, marginals, miss,
-        copula, copula_cols, nrows,
+        copula, copula_cols, privacy, nrows,
         id_cols, fill_dict, mat, rng,
     )
 end

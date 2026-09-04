@@ -412,6 +412,40 @@ DataMimic.privacy_budget(::BoomGenerator) = nothing
         @test nrow(sample(m, 50; rng = MersenneTwister(4))) == 50
     end
 
+    @testset "a fitted model records its budget" begin
+        # A DP artefact that cannot say what guarantee it carries is hard to
+        # act on once it outlives the session that made it, and `save` makes
+        # that gap permanent. The budget lives on the generator now, so
+        # carrying it onto the model costs nothing.
+        rng = MersenneTwister(41)
+        df = DataFrame(a = randn(rng, 300), b = rand(rng, ["x", "y", "z"], 300))
+        b = PrivacyBudget(ε = 3.0, δ = 1e-7)
+
+        for gen in (MSTGenerator(privacy = b), DPCopulaGenerator(privacy = b))
+            m = fit(gen, df; rng = MersenneTwister(42))
+            @test privacy_budget(m) == b
+            # It must say so when displayed, or a private model reads like a
+            # public one.
+            @test occursin("privacy", sprint(show, MIME("text/plain"), m))
+        end
+
+        # A public model carries no guarantee and should not imply one.
+        pub = fit(CopulaGenerator(), df; rng = MersenneTwister(42))
+        @test privacy_budget(pub) === nothing
+        @test !occursin("privacy", sprint(show, MIME("text/plain"), pub))
+
+        # And it has to survive a round trip through disk, which is the case
+        # that matters: the model outlives the code that made it.
+        m = fit(MSTGenerator(privacy = b), df; rng = MersenneTwister(43))
+        path = tempname()
+        try
+            DataMimic.save(path, m)
+            @test privacy_budget(DataMimic.load(path)) == b
+        finally
+            isfile(path) && rm(path)
+        end
+    end
+
     @testset "privacy is a property of the generator" begin
         df = make_df()
         pb = PrivacyBudget(epsilon = 1.0)

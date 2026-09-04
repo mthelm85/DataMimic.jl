@@ -43,6 +43,13 @@ save
 load
 ```
 
+## Privacy
+
+```@docs
+PrivacyBudget
+privacy_budget
+```
+
 ## Evaluation
 
 ```@docs

@@ -9,6 +9,18 @@ budget = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
 model  = fit(MSTGenerator(privacy = budget), df)
 ```
 
+Every fitted private model records the budget it was trained under, so a
+model that outlives the session that produced it can still say what guarantee
+it carries:
+
+```julia
+model = fit(MSTGenerator(ε = 1.0), df)
+privacy_budget(model)      # PrivacyBudget(ε = 1.0, δ = 1.0e-5)
+```
+
+It is shown when the model is displayed, and survives `save`/`load`.
+`privacy_budget` returns `nothing` for a model from a public generator.
+
 ## What the guarantee means
 
 Differential privacy bounds how much the output can depend on any single

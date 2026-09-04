@@ -333,6 +333,10 @@ struct FittedMSTModel{M} <: AbstractFittedModel
     root::Int                                       # index into stat_columns
     root_marginal::Vector{Float64}                  # probability vector for root column
     conditionals::Dict{Tuple{Int,Int}, Matrix{Float64}}  # P(child | parent)
+    # The budget this model was fitted under. A DP artefact that cannot say
+    # what guarantee it carries is of limited use a year later, and `save`
+    # makes that gap durable.
+    privacy::PrivacyBudget
     missingness::Dict{Symbol, Float64}
     n_original::Int
     identifier_columns::Vector{Symbol}
@@ -357,6 +361,10 @@ struct FittedDPCopulaModel{C, M} <: AbstractFittedModel
     missingness::Dict{Symbol, Float64}
     copula::C                          # GaussianCopula or nothing
     copula_columns::Vector{Symbol}
+    # The budget this model was fitted under. A DP artefact that cannot say
+    # what guarantee it carries is of limited use a year later, and `save`
+    # makes that gap durable.
+    privacy::PrivacyBudget
     n_original::Int
     identifier_columns::Vector{Symbol}
     identifier_fills::Dict{Symbol, FillSpec}
@@ -389,6 +397,8 @@ struct FittedDiffusionModel{L, P, S, Mat} <: AbstractFittedModel
     target::Union{Symbol, Nothing}       # label column, or nothing
     target_levels::Vector                # label values in model order
     class_dist::Vector{Float64}          # empirical class distribution
+    # nothing when trained without DP-SGD; the budget spent when not.
+    privacy::Union{Nothing, PrivacyBudget}
     # Trained neural network (Lux)
     lux_model::L                         # Lux model (backbone + embedding)
     trained_params::P                    # EMA params when EMA enabled, else raw

@@ -28,6 +28,23 @@ The classification is reported when it may surprise you — an auto-detected
 identifier logs an informational message naming the column and the ratio that
 triggered it.
 
+### Dates and times
+
+`Date`, `DateTime` and `Time` columns are `:continuous`. They are modelled on
+their own numeric scale — days for `Date`, milliseconds for `DateTime` — and
+come back as the same type they went in as.
+
+Two things follow from that. Chronology is preserved, because the model sees
+an ordered quantity rather than a set of unrelated labels; and synthetic dates
+can fall *between* the observed ones, rather than only reusing dates that
+appear in the input.
+
+It also keeps the model small. Treating dates as categories gives every
+distinct timestamp its own level, and dates are usually near-unique. On a
+1,400-row personnel table, eight date columns expanded to 2,447 of 5,843 model
+dimensions that way — more dimensions than rows, which is enough to stop
+`DiffusionGenerator` converging at all.
+
 ### Overriding with a hint
 
 When the inference gets it wrong, say so with a [`ColumnHint`](@ref):

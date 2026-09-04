@@ -109,9 +109,24 @@ compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator(ε = 1.0)],
 One row per generator and metric, carrying the mean and standard deviation
 across seeds and the mean fit time. The result is a Tables.jl table, so
 `DataFrame(…)` will sort and pivot it. Public and private generators can appear
-in one call: the budget is passed only to the engines that take one.
+in one call, and because each generator carries its own budget, so can the
+same engine at several ε:
 
-Three things worth knowing:
+```julia
+compare([MSTGenerator(ε = 0.5), MSTGenerator(ε = 2.0), MSTGenerator(ε = 8.0)], df)
+```
+
+A metric that needs more than `(real, synth)` — `utility_tstr` needs a target
+column — has a partially applied form, so no wrapper function is required:
+`utility_tstr(:income)`, or `utility_tstr(:income; nrounds = 100)`.
+
+Four things worth knowing:
+
+**A run is reproducible.** Every seed derives from `rng`, including the
+randomness *inside* a metric — `utility_tstr` splits train and test at random,
+and that split is seeded per iteration rather than drawn from the global
+stream. Two calls with the same `rng` give the same numbers, and `compare`
+leaves the caller's random stream where it found it.
 
 **A failing engine does not stop the run.** It is reported with `ok = false`
 and its error message, and the others continue. A diffusion model that diverges

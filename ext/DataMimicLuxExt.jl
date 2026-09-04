@@ -2028,7 +2028,7 @@ function _fit_engine(gen::DiffusionGenerator, cols, col_names, id_set, fill_dict
         info.num_references,
         info.cat_levels, info.cat_dims,
         info.num_round, info.num_eltypes,
-        gen.target, info.target_levels, info.class_dist,
+        gen.target, info.target_levels, info.class_dist, privacy,
         full_model, full_ps, full_st,
         n_steps, betas, alphas_cumprod,
         miss, nrows,

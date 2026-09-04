@@ -725,6 +725,7 @@ function _fit_engine(::MSTGenerator, cols, col_names, id_set, fill_dict,
     return FittedMSTModel(
         col_names, col_kinds, stat_cols, disc,
         tree_edges, root, root_marginal, conditionals,
+        privacy,
         miss, nrows, id_cols, fill_dict, mat, rng,
     )
 end

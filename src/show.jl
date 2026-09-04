@@ -26,6 +26,21 @@ Base.show(io::IO, m::FittedCopulaModel)   = _summary_line(io, m, "FittedCopulaMo
 Base.show(io::IO, m::FittedMSTModel)      = _summary_line(io, m, "FittedMSTModel")
 Base.show(io::IO, m::FittedDPCopulaModel) = _summary_line(io, m, "FittedDPCopulaModel")
 
+"""
+Show the guarantee a fitted model carries, when it carries one.
+
+A private model that displays like a public one invites exactly the mistake
+this line prevents: treating a synthetic table as protected without checking
+what it was protected with.
+"""
+function _privacy_line(io::IO, m)
+    b = privacy_budget(m)
+    b === nothing && return nothing
+    print(io, "
+  privacy: ε = ", b.epsilon, ", δ = ", b.delta)
+    return nothing
+end
+
 function Base.show(io::IO, ::MIME"text/plain", m::FittedCopulaModel)
     _summary_line(io, m, "FittedCopulaModel")
     if isnothing(m.copula)
@@ -41,6 +56,7 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", m::FittedMSTModel)
     _summary_line(io, m, "FittedMSTModel")
+    _privacy_line(io, m)
     print(io, "\n  tree:    ", length(m.tree_edges), " edge",
               length(m.tree_edges) == 1 ? "" : "s",
               ", root = :", m.stat_columns[m.root])
@@ -52,6 +68,7 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", m::FittedDPCopulaModel)
     _summary_line(io, m, "FittedDPCopulaModel")
+    _privacy_line(io, m)
     if isnothing(m.copula)
         print(io, "\n  copula:  none (columns sampled independently)")
     else
@@ -68,6 +85,7 @@ Base.show(io::IO, m::FittedDiffusionModel) =
 
 function Base.show(io::IO, ::MIME"text/plain", m::FittedDiffusionModel)
     _summary_line(io, m, "FittedDiffusionModel")
+    _privacy_line(io, m)
     print(io, "\n  features: ", length(m.num_columns), " numeric, ",
               length(m.cat_columns), " categorical")
     print(io, "\n  schedule: ", m.n_steps, " diffusion timesteps")
