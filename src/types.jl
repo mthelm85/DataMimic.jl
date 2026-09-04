@@ -107,7 +107,12 @@ CopulaGenerator() = CopulaGenerator(:beta)
 
 """
     MSTGenerator(; ε, δ = 1e-5)
+    MSTGenerator(; privacy::PrivacyBudget)
     MSTGenerator(privacy::PrivacyBudget)
+
+Any spelling of the budget works: `ε`/`δ` or `epsilon`/`delta`, or an existing
+`PrivacyBudget` passed as `privacy` or positionally. The budget is required —
+a private generator without one cannot run, so it cannot be constructed.
 
 Private synthetic data via MST (McKenna et al. 2021): measure all 1-way
 marginals → select a spanning tree with the exponential mechanism → measure the
@@ -139,7 +144,12 @@ MSTGenerator(; privacy = nothing, epsilon = nothing, delta = nothing,
 
 """
     DPCopulaGenerator(; ε, δ = 1e-5)
+    DPCopulaGenerator(; privacy::PrivacyBudget)
     DPCopulaGenerator(privacy::PrivacyBudget)
+
+Any spelling of the budget works: `ε`/`δ` or `epsilon`/`delta`, or an existing
+`PrivacyBudget` passed as `privacy` or positionally. The budget is required —
+a private generator without one cannot run, so it cannot be constructed.
 
 DP-noisy histogram marginals + private covariance Gaussian copula.
 Suited for continuous-heavy tables under moderate ε.

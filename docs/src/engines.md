@@ -184,7 +184,7 @@ Ho et al., *DDPM* (NeurIPS 2020); Hoogeboom et al., *Multinomial Diffusion*
 ## MSTGenerator
 
 ```julia
-MSTGenerator(ε = 1.0)          # or MSTGenerator(privacy = budget)
+MSTGenerator(ε = 1.0)              # or MSTGenerator(privacy = budget)
 ```
 
 MST won the NIST differential privacy synthetic data challenge, and it is
@@ -259,7 +259,7 @@ inference for differential privacy* (ICML 2019). Cross-checked against
 ## DPCopulaGenerator
 
 ```julia
-DPCopulaGenerator(ε = 1.0)
+DPCopulaGenerator(ε = 1.0)         # or DPCopulaGenerator(privacy = budget)
 ```
 
 The copula idea again, with both halves made private: differentially private

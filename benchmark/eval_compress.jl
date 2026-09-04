@@ -45,6 +45,27 @@
 # it did not need to discard. Compression pays when the domain is large
 # relative to what the budget can measure; Bach's is not.
 #
+# RE-VERIFIED after categorical levels moved from Dict hash order to sorted
+# order. The synthetic dial reproduced digit for digit, as did BachChoralHarmony
+# - the cost case the conclusion below rests on. rl reproduced on the three
+# cells checked before the run was cut short, and pbcseq to the fourth decimal.
+# MST was never exposed to that change: _discretize_column has always sorted
+# its own levels.
+#
+# Two cjs cells DID change verdict - eps=0.5 better -> noise, eps=1.0 noise ->
+# better - while their numbers moved by less than 0.003. Those cells sit on the
+# significance boundary and cross it with the seed draw, so read them as "no
+# clear effect" rather than as a result in either direction. No cell anywhere
+# moved between better and worse.
+#
+# RUN TIME. Budget a couple of hours, almost all of it `rl`. The expensive
+# cell is rl at eps = 4, not rl at eps = 0.5, which is the opposite of the
+# obvious guess: compression merges LESS as the budget grows, so at eps = 0.5
+# rl collapses 5,602 bins to 127 and the "on" arm is nearly free, while at
+# eps = 4 it only reaches 455 and BOTH arms pay full price. To iterate on the
+# real-table results, drop 41160 from the loop below - the other three finish
+# in minutes.
+#
 # A NOTE ON HOW THIS WAS GOT WRONG. An earlier pass ran the synthetic dial
 # plus Bach alone, concluded from that single real table that compression
 # hurt, and nearly recorded a rejection. Bach is the outlier of the four. One
