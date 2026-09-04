@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>API Reference — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=89f0b011">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=3ec9fad1">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -50,7 +50,7 @@
 <div class="md-docstring" id="DataMimic.fit">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.fit</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/fit.jl#L33-L44" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/fit.jl#L27-L37" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -60,8 +60,6 @@
 <p>Fit a synthetic data model to <code class="md-code-inline">table</code> using the specified generator.</p>
 <p><strong>Keywords</strong></p>
 <ul class="md-list-tight">
-<li><p><code class="md-code-inline">privacy::Union{Nothing, PrivacyBudget}=nothing</code> — required for private generators</p>
-</li>
 <li><p><code class="md-code-inline">hints::Vector{ColumnHint}=ColumnHint[]</code> — column type overrides</p>
 </li>
 <li><p><code class="md-code-inline">identifiers::Vector{Symbol}=Symbol[]</code> — columns to exclude from the model</p>
@@ -76,7 +74,7 @@
 <div class="md-docstring" id="DataMimic.sample">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.sample</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/sample.jl#L101-L106" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/sample.jl#L130-L135" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -103,7 +101,7 @@
 <div class="md-docstring" id="DataMimic.synthesize">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.synthesize</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/sample.jl#L298-L302" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/sample.jl#L327-L331" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -117,7 +115,7 @@
 <div class="md-docstring" id="DataMimic.CopulaGenerator">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.CopulaGenerator</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/types.jl#L66-L71" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/types.jl#L91-L96" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -130,12 +128,12 @@
 <div class="md-docstring" id="DataMimic.DiffusionGenerator">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.DiffusionGenerator</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/types.jl#L116-L147" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/types.jl#L155-L186" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">DiffusionGenerator(; dp=false, epochs=100, batch_size=512, target=nothing)</code></pre>
+<pre><code class="language-julia">DiffusionGenerator(; privacy=nothing, epochs=100, batch_size=512, target=nothing)</code></pre>
 </div>
 <p>TabDDPM [Kotelnikov et al. 2023] with optional DP-SGD.  Requires the <code class="md-code-inline">LuxExt</code> package extension (<code class="md-code-inline">using Lux, Zygote</code> before calling <code class="md-code-inline">fit</code>).</p>
 <p>Architecture and training follow the reference implementation: a plain MLP denoiser (<code class="md-code-inline">Linear → ReLU → Dropout</code> blocks) with additive sinusoidal timestep conditioning, a cosine β schedule, Gaussian diffusion on numeric features and multinomial diffusion on categoricals, AdamW with linear learning-rate annealing, and an exponential moving average of the denoiser weights used for sampling.</p>
@@ -165,12 +163,13 @@
 <div class="md-docstring" id="DataMimic.MSTGenerator">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.MSTGenerator</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/types.jl#L83-L105" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/types.jl#L108-L131" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">MSTGenerator()</code></pre>
+<pre><code class="language-julia">MSTGenerator(; ε, δ = 1e-5)
+MSTGenerator(privacy::PrivacyBudget)</code></pre>
 </div>
 <p>Private synthetic data via MST (McKenna et al. 2021): measure all 1-way marginals → select a spanning tree with the exponential mechanism → measure the selected 2-way marginals → reconcile every measurement with Private-PGM (McKenna et al. 2019) → sample ancestrally from the resulting conditionals. Satisfies (ε,δ)-DP via zCDP composition; the reconciliation step is post-processing and costs no budget.</p>
 <p>Marginal order is not a parameter. MST <em>is</em> the spanning tree over 2-way marginals: the tree is what makes belief propagation exact, and 3-way marginals would need junction-tree inference and a different budget argument. The published mechanism for adaptively chosen higher-order marginals is AIM (McKenna et al. 2022), which is a different algorithm rather than a setting on this one.</p>
@@ -180,12 +179,13 @@
 <div class="md-docstring" id="DataMimic.DPCopulaGenerator">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.DPCopulaGenerator</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/types.jl#L108-L113" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/types.jl#L140-L146" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">DPCopulaGenerator()</code></pre>
+<pre><code class="language-julia">DPCopulaGenerator(; ε, δ = 1e-5)
+DPCopulaGenerator(privacy::PrivacyBudget)</code></pre>
 </div>
 <p>DP-noisy histogram marginals + private covariance Gaussian copula. Suited for continuous-heavy tables under moderate ε.</p>
 </div>
@@ -195,7 +195,7 @@
 <div class="md-docstring" id="DataMimic.FittedCopulaModel">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.FittedCopulaModel</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/types.jl#L232-L237" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/types.jl#L271-L276" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -208,7 +208,7 @@
 <div class="md-docstring" id="DataMimic.FittedMSTModel">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.FittedMSTModel</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/types.jl#L284-L289" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/types.jl#L323-L328" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -221,7 +221,7 @@
 <div class="md-docstring" id="DataMimic.FittedDPCopulaModel">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.FittedDPCopulaModel</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/types.jl#L310-L315" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/types.jl#L353-L358" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -234,7 +234,7 @@
 <div class="md-docstring" id="DataMimic.FittedDiffusionModel">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.FittedDiffusionModel</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/types.jl#L332-L337" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/types.jl#L379-L384" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -248,7 +248,7 @@
 <div class="md-docstring" id="DataMimic.PrivacyBudget">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.PrivacyBudget</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/types.jl#L11-L26" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/types.jl#L11-L26" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -256,7 +256,7 @@
 <pre><code class="language-julia">PrivacyBudget(; epsilon, delta=1e-5)
 PrivacyBudget(; ε, δ=1e-5)</code></pre>
 </div>
-<p>Differential privacy parameters used by private generators (<code class="md-code-inline">MSTGenerator</code>, <code class="md-code-inline">DPCopulaGenerator</code>, <code class="md-code-inline">DiffusionGenerator(dp=true)</code>).</p>
+<p>Differential privacy parameters used by private generators (<code class="md-code-inline">MSTGenerator</code>, <code class="md-code-inline">DPCopulaGenerator</code>, and <code class="md-code-inline">DiffusionGenerator</code> when given one).</p>
 <p><code class="md-code-inline">ε</code>/<code class="md-code-inline">δ</code> are accepted as aliases for <code class="md-code-inline">epsilon</code>/<code class="md-code-inline">delta</code>, and both spellings read back off the resulting budget. Passing both spellings of the same parameter is an error rather than a silent precedence rule.</p>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
@@ -268,7 +268,7 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 <div class="md-docstring" id="DataMimic.ColumnHint">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.ColumnHint</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/types.jl#L188-L193" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/types.jl#L227-L232" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -282,7 +282,7 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 <div class="md-docstring" id="DataMimic.save">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.save</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/serialize.jl#L10-L18" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/serialize.jl#L10-L18" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -296,7 +296,7 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 <div class="md-docstring" id="DataMimic.load">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.load</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/serialize.jl#L27-L33" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/serialize.jl#L27-L33" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -306,16 +306,30 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 <p>Deserialize a fitted model from disk. Throws if the file was saved in an incompatible model format. The format version is independent of the package version; see <code class="md-code-inline">DATAMIMIC_SERIAL_VERSION</code>.</p>
 </div>
 </div>
-<h2 id="Evaluation" class="md-heading">Evaluation<a href="#Evaluation" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
-<div class="md-docstring" id="DataMimic.Evaluate.compare">
+<h2 id="Privacy" class="md-heading">Privacy<a href="#Privacy" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-docstring" id="DataMimic.privacy_budget">
 <div class="md-docstring-header">
-<h4 class="md-docstring-binding"><code>DataMimic.Evaluate.compare</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/evaluate/compare.jl#L18-L68" title="View source">source</a>
+<h4 class="md-docstring-binding"><code>DataMimic.privacy_budget</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/fit.jl#L8-L12" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">compare(generators, table; metrics, n, n_seeds, privacy, ...) -&gt; Vector{NamedTuple}</code></pre>
+<pre><code class="language-julia">privacy_budget(generator) -&gt; Union{Nothing, PrivacyBudget}</code></pre>
+</div>
+<p>The budget a generator will spend, or <code class="md-code-inline">nothing</code> for a non-private one.</p>
+</div>
+</div>
+<h2 id="Evaluation" class="md-heading">Evaluation<a href="#Evaluation" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
+<div class="md-docstring" id="DataMimic.Evaluate.compare">
+<div class="md-docstring-header">
+<h4 class="md-docstring-binding"><code>DataMimic.Evaluate.compare</code></h4>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/evaluate/compare.jl#L18-L77" title="View source">source</a>
+</div>
+<div class="md-docstring-content">
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">compare(generators, table; metrics, n, n_seeds, ...) -&gt; Vector{NamedTuple}</code></pre>
 </div>
 <p>Fit each generator to <code class="md-code-inline">table</code>, sample from it, and score the result with each metric.  Returns one row per generator × metric, carrying the mean and standard deviation across seeds and the mean fit time.</p>
 <p>The result is a <code class="md-code-inline">Vector{NamedTuple}</code>, which is already a Tables.jl table — pass it to <code class="md-code-inline">DataFrame</code> to sort or pivot.</p>
@@ -334,11 +348,11 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 </li>
 <li><p><code class="md-code-inline">n_seeds = 3</code>: how many times to repeat each fit and sample.  Fewer than 3 makes the reported standard deviation meaningless.</p>
 </li>
-<li><p><code class="md-code-inline">privacy = nothing</code>: budget for private generators.  Public generators are fitted without one, so a mixed list works in a single call.</p>
+<li><p>Budgets are carried by the generators themselves, so one call can compare the same engine at several ε: <code class="md-code-inline">compare([MSTGenerator(ε = 0.5), MSTGenerator(ε = 2.0), CopulaGenerator()], df)</code>. Public generators are fitted without one, so a mixed list works in a single call.</p>
 </li>
 <li><p><code class="md-code-inline">hints</code>, <code class="md-code-inline">identifiers</code>, <code class="md-code-inline">fill</code>: forwarded to <code class="md-code-inline">fit</code>.</p>
 </li>
-<li><p><code class="md-code-inline">rng</code>: seeds derive from this, so a run is reproducible.</p>
+<li><p><code class="md-code-inline">rng</code>: seeds derive from this, so a run is reproducible — including metrics that are themselves stochastic, whose randomness is seeded around each call rather than left to the global stream.</p>
 </li>
 </ul>
 <p><strong>Failure handling</strong></p>
@@ -348,17 +362,18 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 <p><strong>Example</strong></p>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">compare([CopulaGenerator(), CopulaGenerator(:gaussian)], df;
+<pre><code class="language-julia">compare([CopulaGenerator(), MSTGenerator(ε = 0.5), MSTGenerator(ε = 4.0)], df;
         metrics = (fidelity = fidelity_score,
-                   utility  = (r, s) -&gt; utility_tstr(r, s, :income).ratio),
+                   utility  = utility_tstr(:income)),
         n_seeds = 5)</code></pre>
 </div>
+<p>Each generator carries its own budget, so one call can compare an engine at several ε. A metric needing more than <code class="md-code-inline">(real, synth)</code> has a partially applied form, so no wrapper function is required.</p>
 </div>
 </div>
 <div class="md-docstring" id="DataMimic.Evaluate.fidelity_score">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.fidelity_score</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/evaluate/fidelity.jl#L127-L145" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/evaluate/fidelity.jl#L127-L145" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -388,7 +403,7 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 <div class="md-docstring" id="DataMimic.Evaluate.utility_tstr">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.utility_tstr</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/evaluate/tstr.jl#L133-L160" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/evaluate/tstr.jl#L133-L160" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -448,7 +463,7 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 <div class="md-docstring" id="DataMimic.Evaluate.privacy_dcr">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.privacy_dcr</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/evaluate/dcr.jl#L102-L115" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/evaluate/dcr.jl#L102-L115" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -473,7 +488,7 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 <div class="md-docstring" id="DataMimic.Evaluate.jensen_shannon">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.jensen_shannon</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/evaluate/jsd.jl#L78-L93" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/evaluate/jsd.jl#L78-L93" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -499,7 +514,7 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 <div class="md-docstring" id="DataMimic.Evaluate.pairwise_marginal_error">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.pairwise_marginal_error</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/evaluate/marginal_error.jl#L74-L91" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/evaluate/marginal_error.jl#L74-L91" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
@@ -527,12 +542,12 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
 <div class="md-docstring" id="DataMimic.Evaluate.privacy_utility_sweep">
 <div class="md-docstring-header">
 <h4 class="md-docstring-binding"><code>DataMimic.Evaluate.privacy_utility_sweep</code></h4>
-<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/23a846e8ebc350ae9aed38578377c41a378d6bec/src/evaluate/sweep.jl#L6-L32" title="View source">source</a>
+<a class="md-docstring-source" href="https://github.com/mthelm85/DataMimic.jl/blob/ecb3d933156e76ae653b0222b61cba78db10c7ea/src/evaluate/sweep.jl#L6-L39" title="View source">source</a>
 </div>
 <div class="md-docstring-content">
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">privacy_utility_sweep(generator, table, epsilons, metric_fn;
+<pre><code class="language-julia">privacy_utility_sweep(make_generator, table, epsilons, metric_fn;
                       n = nothing, hints = ColumnHint[],
                       identifiers = Symbol[],
                       fill = Dict{Symbol, FillSpec}(),
@@ -540,17 +555,21 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
                       delta = 1e-5,
                       metric_kw...) -&gt; Vector{NamedTuple}</code></pre>
 </div>
-<p>Run a privacy–utility curve: for each ε in <code class="md-code-inline">epsilons</code>, fit <code class="md-code-inline">generator</code> with <code class="md-code-inline">PrivacyBudget(; epsilon=ε, delta)</code>, sample <code class="md-code-inline">n</code> rows (default = number of rows in <code class="md-code-inline">table</code>), and evaluate with <code class="md-code-inline">metric_fn(real, synth)</code>.</p>
-<p><code class="md-code-inline">generator</code> must be an <code class="md-code-inline">AbstractPrivateGenerator</code> or a <code class="md-code-inline">DiffusionGenerator(dp=true)</code>.</p>
-<p>Returns a vector of <code class="md-code-inline">(; epsilon, delta, metric_result)</code> named tuples, one per ε value, sorted by ascending ε.</p>
-<p>Standard usage:</p>
+<p>Run a privacy–utility curve: for each ε in <code class="md-code-inline">epsilons</code>, build a generator with <code class="md-code-inline">PrivacyBudget(; epsilon = ε, delta)</code>, fit it to <code class="md-code-inline">table</code>, sample <code class="md-code-inline">n</code> rows (default: as many as <code class="md-code-inline">table</code> has), and evaluate <code class="md-code-inline">metric_fn(real, synth)</code>.</p>
+<p><code class="md-code-inline">make_generator</code> is anything callable with a <code class="md-code-inline">PrivacyBudget</code>. A private generator&#39;s <em>type</em> already is, so the common case reads:</p>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
 <pre><code class="language-julia">results = privacy_utility_sweep(
-    MSTGenerator(), data, [0.1, 0.5, 1.0, 5.0, 10.0],
-    fidelity_score
-)</code></pre>
+    MSTGenerator, data, [0.1, 0.5, 1.0, 5.0, 10.0], fidelity_score)</code></pre>
 </div>
+<p>and a generator needing other settings is a one-line closure:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">privacy_utility_sweep(b -&gt; DiffusionGenerator(privacy = b, epochs = 50),
+                      data, epsilons, fidelity_score)</code></pre>
+</div>
+<p>A budget is a property of the generator rather than of <code class="md-code-inline">fit</code>, so a sweep over ε has to build one generator per ε — hence a constructor here rather than a single instance, which would already have had its ε fixed.</p>
+<p>Returns <code class="md-code-inline">(; epsilon, delta, metric_result)</code> per ε, ascending.</p>
 </div>
 </div>
       </article>
@@ -566,6 +585,7 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
           <a class="md-toc-link md-toc-h2" href="#Fitted-models">Fitted models</a>
           <a class="md-toc-link md-toc-h2" href="#Configuration">Configuration</a>
           <a class="md-toc-link md-toc-h2" href="#Persistence">Persistence</a>
+          <a class="md-toc-link md-toc-h2" href="#Privacy">Privacy</a>
           <a class="md-toc-link md-toc-h2" href="#Evaluation">Evaluation</a>
       </div>
     </aside>
@@ -576,6 +596,6 @@ PrivacyBudget(ε = 1.0, δ = 1e-5)      # identical</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=89f0b011"></script>
+  <script src="../assets/materialdocs.js?v=3ec9fad1"></script>
 </body>
 </html>

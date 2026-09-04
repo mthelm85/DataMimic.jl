@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DataMimic.jl — DataMimic.jl</title>
-  <link rel="stylesheet" href="./assets/materialdocs.css?v=ac64bb76">
+  <link rel="stylesheet" href="./assets/materialdocs.css?v=4ebe4f44">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="./assets/favicon.png">
   <script>
@@ -83,7 +83,7 @@ syn   = sample(model, 500)</code></pre>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
 <pre><code class="language-julia">budget = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
-model  = fit(MSTGenerator(), df; privacy = budget)
+model  = fit(MSTGenerator(privacy = budget), df)
 syn    = sample(model, 500)</code></pre>
 </div>
 <p>Drawing samples from a fitted private model costs nothing further, however many rows you take. See <a href="./privacy/">Privacy</a>.</p>
@@ -91,8 +91,7 @@ syn    = sample(model, 500)</code></pre>
 <p>There is no engine that wins everywhere, and which one suits a table is not reliably predictable from its shape. <a href="./api/#DataMimic.Evaluate.compare"><code class="md-code-inline">compare</code></a> fits several to your own data and reports how each did:</p>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator()], df;
-        privacy = PrivacyBudget(epsilon = 1.0))</code></pre>
+<pre><code class="language-julia">compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator(ε = 1.0)], df)</code></pre>
 </div>
 <h2 id="Where-to-go-next" class="md-heading">Where to go next<a href="#Where-to-go-next" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
 <ul class="md-list-tight">
@@ -129,6 +128,6 @@ syn    = sample(model, 500)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="./siteinfo.js"></script>
   <script src="./../versions.js"></script>
-  <script src="./assets/materialdocs.js?v=ac64bb76"></script>
+  <script src="./assets/materialdocs.js?v=4ebe4f44"></script>
 </body>
 </html>

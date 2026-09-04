@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Preparing your data — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=ba548027">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=a8b7a27a">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -87,6 +87,10 @@
 </div>
 <p>Detection is cardinality-aware, which matters most for integers. A column of whole numbers holding five distinct values in ten thousand rows is a category that happens to be numbered, and modelling it as continuous would invent values between the levels. The same column with ten thousand distinct values is a genuine numeric variable. Detection draws that line by the ratio of distinct values to rows, not by the element type.</p>
 <p>The classification is reported when it may surprise you — an auto-detected identifier logs an informational message naming the column and the ratio that triggered it.</p>
+<h3 id="Dates-and-times" class="md-heading">Dates and times<a href="#Dates-and-times" class="md-heading-anchor" aria-label="Link to this section">#</a></h3>
+<p><code class="md-code-inline">Date</code>, <code class="md-code-inline">DateTime</code> and <code class="md-code-inline">Time</code> columns are <code class="md-code-inline">:continuous</code>. They are modelled on their own numeric scale — days for <code class="md-code-inline">Date</code>, milliseconds for <code class="md-code-inline">DateTime</code> — and come back as the same type they went in as.</p>
+<p>Two things follow from that. Chronology is preserved, because the model sees an ordered quantity rather than a set of unrelated labels; and synthetic dates can fall <em>between</em> the observed ones, rather than only reusing dates that appear in the input.</p>
+<p>It also keeps the model small. Treating dates as categories gives every distinct timestamp its own level, and dates are usually near-unique. On a 1,400-row personnel table, eight date columns expanded to 2,447 of 5,843 model dimensions that way — more dimensions than rows, which is enough to stop <code class="md-code-inline">DiffusionGenerator</code> converging at all.</p>
 <h3 id="Overriding-with-a-hint" class="md-heading">Overriding with a hint<a href="#Overriding-with-a-hint" class="md-heading-anchor" aria-label="Link to this section">#</a></h3>
 <p>When the inference gets it wrong, say so with a <a href="../api/#DataMimic.ColumnHint"><code class="md-code-inline">ColumnHint</code></a>:</p>
 <div class="md-code-block">
@@ -175,6 +179,7 @@ syn2  = sample(model, 500; rng = MersenneTwister(7))   # or pass another</code><
       <div class="md-toc-inner">
         <p class="md-toc-title">On this page</p>
           <a class="md-toc-link md-toc-h2" href="#Column-type-detection">Column type detection</a>
+            <a class="md-toc-link md-toc-h3" href="#Dates-and-times">Dates and times</a>
             <a class="md-toc-link md-toc-h3" href="#Overriding-with-a-hint">Overriding with a hint</a>
           <a class="md-toc-link md-toc-h2" href="#Identifiers">Identifiers</a>
           <a class="md-toc-link md-toc-h2" href="#Missing-values">Missing values</a>
@@ -188,6 +193,6 @@ syn2  = sample(model, 500; rng = MersenneTwister(7))   # or pass another</code><
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=ba548027"></script>
+  <script src="../assets/materialdocs.js?v=a8b7a27a"></script>
 </body>
 </html>

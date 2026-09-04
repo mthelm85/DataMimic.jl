@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Evaluation — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=fb258aad">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=86004329">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -104,14 +104,19 @@ d.exact_matches  # synthetic rows identical to some real row</code></pre>
 <h2 id="Comparing-engines" class="md-heading">Comparing engines<a href="#Comparing-engines" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator()], df;
+<pre><code class="language-julia">compare([CopulaGenerator(), CopulaGenerator(:gaussian), MSTGenerator(ε = 1.0)], df;
         metrics = (fidelity = fidelity_score,
-                   utility  = (r, s) -&gt; utility_tstr(r, s, :income).ratio),
-        n_seeds = 5,
-        privacy = PrivacyBudget(epsilon = 1.0))</code></pre>
+                   utility  = utility_tstr(:income)),
+        n_seeds = 5)</code></pre>
 </div>
-<p>One row per generator and metric, carrying the mean and standard deviation across seeds and the mean fit time. The result is a Tables.jl table, so <code class="md-code-inline">DataFrame(…)</code> will sort and pivot it. Public and private generators can appear in one call: the budget is passed only to the engines that take one.</p>
-<p>Three things worth knowing:</p>
+<p>One row per generator and metric, carrying the mean and standard deviation across seeds and the mean fit time. The result is a Tables.jl table, so <code class="md-code-inline">DataFrame(…)</code> will sort and pivot it. Public and private generators can appear in one call, and because each generator carries its own budget, so can the same engine at several ε:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">compare([MSTGenerator(ε = 0.5), MSTGenerator(ε = 2.0), MSTGenerator(ε = 8.0)], df)</code></pre>
+</div>
+<p>A metric that needs more than <code class="md-code-inline">(real, synth)</code> — <code class="md-code-inline">utility_tstr</code> needs a target column — has a partially applied form, so no wrapper function is required: <code class="md-code-inline">utility_tstr(:income)</code>, or <code class="md-code-inline">utility_tstr(:income; nrounds = 100)</code>.</p>
+<p>Four things worth knowing:</p>
+<p><strong>A run is reproducible.</strong> Every seed derives from <code class="md-code-inline">rng</code>, including the randomness <em>inside</em> a metric — <code class="md-code-inline">utility_tstr</code> splits train and test at random, and that split is seeded per iteration rather than drawn from the global stream. Two calls with the same <code class="md-code-inline">rng</code> give the same numbers, and <code class="md-code-inline">compare</code> leaves the caller&#39;s random stream where it found it.</p>
 <p><strong>A failing engine does not stop the run.</strong> It is reported with <code class="md-code-inline">ok = false</code> and its error message, and the others continue. A diffusion model that diverges overnight should not cost you the comparison of everything else.</p>
 <p><strong>Read the spread, not just the mean.</strong> On Adult at ε = 0.5, <code class="md-code-inline">MSTGenerator</code>&#39;s utility ratio has a seed-to-seed standard deviation of about 0.06 — larger than most differences worth acting on. Three seeds is the floor; below that the reported <code class="md-code-inline">sd</code> is meaningless, and <code class="md-code-inline">compare</code> warns.</p>
 <p><strong>Results describe the configuration you passed, not the engine in general.</strong> Engines differ enormously in how much they depend on their hyperparameters. A <code class="md-code-inline">DiffusionGenerator</code> left at the default epoch count is undertrained, and a comparison that includes it is measuring that fact rather than the method. Give each engine a fair configuration before drawing conclusions from the ranking.</p>
@@ -125,7 +130,7 @@ d.exact_matches  # synthetic rows identical to some real row</code></pre>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
 <pre><code class="language-julia">privacy_utility_sweep(
-    MSTGenerator(), df, [0.5, 1.0, 2.0, 4.0, 8.0],
+    MSTGenerator, df, [0.5, 1.0, 2.0, 4.0, 8.0],
     (real, synth) -&gt; fidelity_score(real, synth).aggregate,
 )</code></pre>
 </div>
@@ -152,6 +157,6 @@ d.exact_matches  # synthetic rows identical to some real row</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=fb258aad"></script>
+  <script src="../assets/materialdocs.js?v=86004329"></script>
 </body>
 </html>

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Engines — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=4fd23868">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=458b5a94">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -93,7 +93,9 @@ CopulaGenerator(:gaussian)</code></pre>
 <p>A copula separates a joint distribution into two independent parts: the marginal distribution of each column, and the dependence structure linking them. Sklar&#39;s theorem guarantees this decomposition always exists, which makes it a natural fit for tabular data — each column&#39;s shape is modelled exactly by its empirical distribution, and only the coupling between columns needs to be estimated.</p>
 <p><strong>How it works.</strong> Each column is mapped to a uniform pseudo-observation on [0, 1] by its own empirical CDF. A copula is fitted to those uniforms. To sample, DataMimic draws from the copula and pushes each coordinate back through the corresponding inverse CDF, which reproduces the original marginals by construction.</p>
 <p><strong>Categorical columns</strong> take part in the copula through the <em>distributional transform</em>: a level occupying the CDF interval <code class="md-code-inline">[F(k-1), F(k)]</code> maps to a uniform draw inside that interval, and sampling inverts the same step function. Dependence between categorical and numeric columns is therefore modelled rather than discarded.</p>
-<p>Two consequences are worth knowing. The association a copula can express is monotone in the level ordering, which is arbitrary for a nominal variable, so this captures a real part of the dependence but not all of it. And the two copula families differ sharply here: <code class="md-code-inline">:beta</code> is nonparametric and can represent the non-monotone structure an arbitrary ordering produces, while <code class="md-code-inline">:gaussian</code> is restricted to a single correlation matrix and cannot. On the Adult dataset the train-on-synthetic utility ratio is about 0.99 for <code class="md-code-inline">:beta</code> against 0.66 for <code class="md-code-inline">:gaussian</code>. Prefer the default unless you specifically want a Gaussian dependence structure.</p>
+<p>Two consequences are worth knowing. The association a copula can express is <strong>monotone in the level ordering</strong>, so that ordering matters. Levels are sorted, which is the meaningful order for an ordinal column — a grade band, a survey scale, a zero-padded code — and an arbitrary but stable one for a nominal column, where no order is better than another. Sorting is not cosmetic: on a synthetic ordinal column correlated 0.99 with a numeric one, <code class="md-code-inline">:gaussian</code> recovered 0.13 when levels came back in hash order and 0.94 once sorted.</p>
+<p>The two copula families still differ sharply here. <code class="md-code-inline">:beta</code> is nonparametric and can represent non-monotone structure, so it is far more forgiving of a level order that does not match the data; <code class="md-code-inline">:gaussian</code> is restricted to a single correlation matrix and can only use the order it is given. On the Adult dataset the train-on-synthetic utility ratio is about 0.99 for <code class="md-code-inline">:beta</code> against 0.66 for <code class="md-code-inline">:gaussian</code>. Prefer the default unless you specifically want a Gaussian dependence structure.</p>
+<p>If a column is ordinal but does not sort into its natural order — <code class="md-code-inline">&quot;low&quot;</code>, <code class="md-code-inline">&quot;medium&quot;</code>, <code class="md-code-inline">&quot;high&quot;</code> sorts alphabetically — pass the order explicitly with <code class="md-code-inline">ColumnHint(name = :size, kind = :categorical, levels = [&quot;low&quot;, &quot;medium&quot;, &quot;high&quot;])</code>.</p>
 <p><code class="md-code-inline">:gaussian</code> carries one further restriction. It estimates a correlation matrix and factorizes it, and that factorization fails when the modelled columns are linearly dependent after the rank transform. Fewer complete cases than columns guarantees it; collinear columns can, though whether an exactly duplicated column trips it is a matter of round-off. DataMimic adjusts such a matrix to the nearest positive-definite correlation matrix and warns, rather than failing: a near-duplicate pair comes back at a correlation indistinguishable from 1, but dependence among the affected columns is approximate. <code class="md-code-inline">:beta</code> needs no such adjustment.</p>
 <p>A categorical column with only one observed level cannot be encoded this way, so it is left out of the copula and drawn independently.</p>
 <p><strong>Cost.</strong> Fitting is a rank transform plus a copula fit — seconds on tables where the diffusion model takes many minutes. This is the engine to start with.</p>
@@ -130,7 +132,7 @@ model = fit(gen, df)</code></pre>
 <p><strong>Tuning.</strong> This engine has far more configuration than the others, and its results depend on it. The defaults are deliberately modest so a first run finishes quickly; they are not tuned for quality. <code class="md-code-inline">d_layers</code> sets explicit per-layer widths and overrides <code class="md-code-inline">hidden_dim</code>/<code class="md-code-inline">n_blocks</code>, <code class="md-code-inline">num_timesteps</code> sets the length of the diffusion process, and <code class="md-code-inline">ema_decay</code> controls the exponential moving average of weights used for sampling. The configuration above is the paper&#39;s tuned Adult architecture and is a reasonable starting point for a table of similar size.</p>
 <p>An undertrained diffusion model can score no better than independent sampling. If it places last in a comparison, check the epoch count before concluding anything about the method.</p>
 <p><strong>Divergence.</strong> Training aborts with an explanatory error if the loss stops being finite, rather than burning the remaining epochs on weights that can no longer recover. A lower <code class="md-code-inline">lr</code>, a smaller <code class="md-code-inline">batch_size</code>, or a narrower <code class="md-code-inline">d_layers</code> usually resolves it.</p>
-<p><strong>Privacy.</strong> <code class="md-code-inline">dp = true</code> trains with DP-SGD and requires a budget; see <a href="../privacy/">Privacy</a>.</p>
+<p><strong>Privacy.</strong> Passing a <code class="md-code-inline">privacy</code> budget trains with DP-SGD; see <a href="../privacy/">Privacy</a>.</p>
 <p>DP training is slower than ordinary training but no longer dramatically so. Clipping each example&#39;s gradient individually appears to require one backward pass per example; it does not. For a <code class="md-code-inline">Dense</code> layer, example <em>i</em>&#39;s weight gradient is an outer product, so its norm is the product of two column norms — which means every example&#39;s norm, and the clipped sum, come out of two batched passes rather than <em>B</em> unbatched ones. This is <em>ghost clipping</em> (Goodfellow 2015; Li et al. 2021), and it is an exact identity rather than an approximation: DataMimic&#39;s tests assert the two agree to floating-point rounding, both per step and over a full training run.</p>
 <p>Larger batches make DP training <em>cheaper</em> per epoch, as they do for ordinary training — the opposite of the per-example behaviour.</p>
 <p><strong>References.</strong> Kotelnikov et al., <em>TabDDPM</em> (ICML 2023, <a href="https://arxiv.org/abs/2209.15421">arXiv:2209.15421</a>), cross-checked against <a href="https://github.com/yandex-research/tab-ddpm">yandex-research/tab-ddpm</a>; Ho et al., <em>DDPM</em> (NeurIPS 2020); Hoogeboom et al., <em>Multinomial Diffusion</em> (NeurIPS 2021); Nichol &amp; Dhariwal (ICML 2021) for the cosine noise schedule.</p>
@@ -138,7 +140,7 @@ model = fit(gen, df)</code></pre>
 <h2 id="MSTGenerator" class="md-heading">MSTGenerator<a href="#MSTGenerator" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">MSTGenerator()      # 2-way marginals</code></pre>
+<pre><code class="language-julia">MSTGenerator(ε = 1.0)          # or MSTGenerator(privacy = budget)</code></pre>
 </div>
 <p>MST won the NIST differential privacy synthetic data challenge, and it is built around a simple observation: you cannot afford to measure everything privately, so spend the budget on the relationships that matter most.</p>
 <p><strong>How it works.</strong></p>
@@ -171,7 +173,7 @@ model = fit(gen, df)</code></pre>
 <h2 id="DPCopulaGenerator" class="md-heading">DPCopulaGenerator<a href="#DPCopulaGenerator" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
-<pre><code class="language-julia">DPCopulaGenerator()</code></pre>
+<pre><code class="language-julia">DPCopulaGenerator(ε = 1.0)</code></pre>
 </div>
 <p>The copula idea again, with both halves made private: differentially private histogram marginals combined with a differentially private covariance matrix, assembled into a Gaussian copula.</p>
 <p><strong>How it works.</strong> Each column&#39;s marginal is estimated as a histogram with Gaussian noise added to the counts. The dependence structure comes from a private covariance matrix estimated by the Analyze-Gauss mechanism, which adds symmetric Gaussian noise to the second-moment matrix — symmetric because the matrix is symmetric, and noising the two triangles independently would give the off-diagonal entries half the intended variance. Sampling draws from the resulting Gaussian copula and inverts the noisy marginals.</p>
@@ -204,6 +206,6 @@ model = fit(gen, df)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=4fd23868"></script>
+  <script src="../assets/materialdocs.js?v=458b5a94"></script>
 </body>
 </html>

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Privacy — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=37910ba3">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=c02fef5e">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="icon" href="../assets/favicon.png">
   <script>
@@ -50,8 +50,15 @@
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
 <pre><code class="language-julia">budget = PrivacyBudget(epsilon = 1.0, delta = 1e-5)
-model  = fit(MSTGenerator(), df; privacy = budget)</code></pre>
+model  = fit(MSTGenerator(privacy = budget), df)</code></pre>
 </div>
+<p>Every fitted private model records the budget it was trained under, so a model that outlives the session that produced it can still say what guarantee it carries:</p>
+<div class="md-code-block">
+<button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
+<pre><code class="language-julia">model = fit(MSTGenerator(ε = 1.0), df)
+privacy_budget(model)      # PrivacyBudget(ε = 1.0, δ = 1.0e-5)</code></pre>
+</div>
+<p>It is shown when the model is displayed, and survives <code class="md-code-inline">save</code>/<code class="md-code-inline">load</code>. <code class="md-code-inline">privacy_budget</code> returns <code class="md-code-inline">nothing</code> for a model from a public generator.</p>
 <h2 id="What-the-guarantee-means" class="md-heading">What the guarantee means<a href="#What-the-guarantee-means" class="md-heading-anchor" aria-label="Link to this section">#</a></h2>
 <p>Differential privacy bounds how much the output can depend on any single record. Concretely: had one person been removed from your table before fitting, the probability of producing any particular synthetic dataset would change by at most a factor of about <code class="md-code-inline">exp(ε)</code> — with the <code class="md-code-inline">δ</code> term allowing a small probability of exceeding that.</p>
 <p>The practical consequence is that nobody can confidently determine whether a given individual was in the input, no matter what auxiliary information they bring. That is a strong and unusual property: it holds against attackers you did not anticipate, and it does not decay as other datasets are published.</p>
@@ -63,7 +70,7 @@ model  = fit(MSTGenerator(), df; privacy = budget)</code></pre>
 </li>
 <li><p><strong><a href="../api/#DataMimic.DPCopulaGenerator"><code class="md-code-inline">DPCopulaGenerator</code></a></strong> splits between the histogram marginals and the private covariance matrix.</p>
 </li>
-<li><p><strong><a href="../api/#DataMimic.DiffusionGenerator"><code class="md-code-inline">DiffusionGenerator</code></a><code class="md-code-inline">(dp = true)</code></strong> trains with DP-SGD — per-example gradient clipping plus Gaussian noise — accounted with Rényi DP over Poisson-subsampled minibatches. Per-example clipping is done by ghost clipping, which gets each example&#39;s gradient norm without a backward pass per example; see <a href="../engines/#DiffusionGenerator">DiffusionGenerator</a>.</p>
+<li><p><strong><a href="../api/#DataMimic.DiffusionGenerator"><code class="md-code-inline">DiffusionGenerator</code></a><code class="md-code-inline">(privacy = budget)</code></strong> trains with DP-SGD — per-example gradient clipping plus Gaussian noise — accounted with Rényi DP over Poisson-subsampled minibatches. Per-example clipping is done by ghost clipping, which gets each example&#39;s gradient norm without a backward pass per example; see <a href="../engines/#DiffusionGenerator">DiffusionGenerator</a>.</p>
 </li>
 </ul>
 <p>Sampling from a fitted private model is post-processing: draw as many synthetic rows as you like without spending anything more. This is a genuine property of differential privacy, not a shortcut — once the model is private, no amount of querying it can un-privatize it.</p>
@@ -79,7 +86,7 @@ model  = fit(MSTGenerator(), df; privacy = budget)</code></pre>
 <div class="md-code-block">
 <button class="md-copy-btn" title="Copy to clipboard" aria-label="Copy code"><span class="md-copy-icon">⧉</span><span class="md-copy-feedback">Copied!</span></button>
 <pre><code class="language-julia">privacy_utility_sweep(
-    MSTGenerator(), df, [0.5, 1.0, 2.0, 4.0, 8.0],
+    MSTGenerator, df, [0.5, 1.0, 2.0, 4.0, 8.0],
     (real, synth) -&gt; fidelity_score(real, synth).aggregate,
 )</code></pre>
 </div>
@@ -116,6 +123,6 @@ model  = fit(MSTGenerator(), df; privacy = budget)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=37910ba3"></script>
+  <script src="../assets/materialdocs.js?v=c02fef5e"></script>
 </body>
 </html>
