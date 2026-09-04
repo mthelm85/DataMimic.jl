@@ -49,6 +49,12 @@
 # about from a single seed. See benchmark/eval_compress.jl for the multi-seed
 # comparison.
 #
+# Re-verified after categorical levels were changed from Dict hash order to
+# sorted order: every figure above reproduced to four decimals. MST was never
+# affected, because _discretize_column has always sorted its own levels - the
+# change was to the copula engines, which build marginals by a different
+# path.
+#
 # Note that the TSTR ratio now RISES with epsilon (0.767 -> 0.799) where before
 # it was flat at ~0.79.  Flatness was the symptom of selection being a uniform
 # random draw: extra budget bought nothing.  The eps = 0.5 rows differ by less
