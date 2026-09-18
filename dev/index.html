@@ -4,8 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DataMimic.jl — DataMimic.jl</title>
-  <link rel="stylesheet" href="./assets/materialdocs.css?v=57217ea9">
+  <link rel="stylesheet" href="./assets/materialdocs.css?v=7b99863e">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <meta name="title" content="DataMimic.jl — DataMimic.jl">
+  <meta property="og:title" content="DataMimic.jl — DataMimic.jl">
+  <meta property="twitter:title" content="DataMimic.jl — DataMimic.jl">
+  <meta name="description" content="Documentation for DataMimic.jl.">
+  <meta property="og:description" content="Documentation for DataMimic.jl.">
+  <meta property="twitter:description" content="Documentation for DataMimic.jl.">
   <link rel="icon" href="./assets/favicon.png">
   <script>
     (function(){
@@ -14,7 +20,7 @@
     })()
   </script>
 </head>
-<body>
+<body data-warn-outdated>
   <header class="md-navbar">
     <button id="md-hamburger" class="md-icon-btn md-hamburger" aria-label="Toggle navigation" aria-expanded="false"><svg class="md-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg></button>
     <img class="md-navbar-logo" src="./assets/logo.png" alt="DataMimic.jl logo" height="32">
@@ -36,7 +42,7 @@
   </header>
   <div class="md-layout">
     <nav class="md-sidebar">
-      <a href="./">Home</a>
+      <a href="./" class="md-nav-active">Home</a>
       <a href="./data/">Your data</a>
       <a href="./engines/">Engines</a>
       <a href="./privacy/">Privacy</a>
@@ -45,6 +51,7 @@
     </nav>
     <main class="md-content">
       <article class="md-article">
+      <div class="md-article-actions"><a class="md-icon-btn md-edit-link" href="https://github.com/mthelm85/DataMimic.jl/blob/main/docs/src/index.md" title="Edit source on GitHub" aria-label="Edit source on GitHub"><svg class="md-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 000-1.41l-2.34-2.34a.996.996 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></a></div>
 <h1 id="DataMimic.jl" class="md-heading">DataMimic.jl<a href="#DataMimic.jl" class="md-heading-anchor" aria-label="Link to this section">#</a></h1>
 <p>Synthetic tabular data generation for Julia, with optional differential privacy.</p>
 <p>DataMimic fits a generative model to a table and draws new rows from it. The synthetic rows are not copies or perturbations of real ones: they are samples from a distribution estimated from your data, so column distributions and the relationships between columns are preserved while individual records are not.</p>
@@ -108,7 +115,7 @@ syn    = sample(model, 500)</code></pre>
 </ul>
       </article>
       <footer class="md-footer">
-        <p>Built with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and <a href="https://github.com/mthelm85/MaterialDocs.jl">MaterialDocs.jl</a></p>
+<p>Built with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and <a href="https://github.com/mthelm85/MaterialDocs.jl">MaterialDocs.jl</a>.</p>
       </footer>
     </main>
     <aside class="md-toc">
@@ -128,6 +135,6 @@ syn    = sample(model, 500)</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="./siteinfo.js"></script>
   <script src="./../versions.js"></script>
-  <script src="./assets/materialdocs.js?v=57217ea9"></script>
+  <script src="./assets/materialdocs.js?v=7b99863e"></script>
 </body>
 </html>

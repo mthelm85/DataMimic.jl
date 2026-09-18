@@ -4,8 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Evaluation — DataMimic.jl</title>
-  <link rel="stylesheet" href="../assets/materialdocs.css?v=5b928442">
+  <link rel="stylesheet" href="../assets/materialdocs.css?v=6fb28447">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <meta name="title" content="Evaluation — DataMimic.jl">
+  <meta property="og:title" content="Evaluation — DataMimic.jl">
+  <meta property="twitter:title" content="Evaluation — DataMimic.jl">
+  <meta name="description" content="Documentation for DataMimic.jl.">
+  <meta property="og:description" content="Documentation for DataMimic.jl.">
+  <meta property="twitter:description" content="Documentation for DataMimic.jl.">
   <link rel="icon" href="../assets/favicon.png">
   <script>
     (function(){
@@ -14,7 +20,7 @@
     })()
   </script>
 </head>
-<body>
+<body data-warn-outdated>
   <header class="md-navbar">
     <button id="md-hamburger" class="md-icon-btn md-hamburger" aria-label="Toggle navigation" aria-expanded="false"><svg class="md-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg></button>
     <img class="md-navbar-logo" src="../assets/logo.png" alt="DataMimic.jl logo" height="32">
@@ -40,11 +46,12 @@
       <a href="../data/">Your data</a>
       <a href="../engines/">Engines</a>
       <a href="../privacy/">Privacy</a>
-      <a href="../evaluation/">Evaluation</a>
+      <a href="../evaluation/" class="md-nav-active">Evaluation</a>
       <a href="../api/">API</a>
     </nav>
     <main class="md-content">
       <article class="md-article">
+      <div class="md-article-actions"><a class="md-icon-btn md-edit-link" href="https://github.com/mthelm85/DataMimic.jl/blob/main/docs/src/evaluation.md" title="Edit source on GitHub" aria-label="Edit source on GitHub"><svg class="md-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true" focusable="false"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 000-1.41l-2.34-2.34a.996.996 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></a></div>
 <h1 id="Evaluation" class="md-heading">Evaluation<a href="#Evaluation" class="md-heading-anchor" aria-label="Link to this section">#</a></h1>
 <p>A synthetic table that looks plausible can still be useless for the analysis you intend to run on it, and one that scores well on distributional similarity can still sit uncomfortably close to real records. DataMimic ships three families of metric to check for each of those separately:</p>
 <ul class="md-list-tight">
@@ -137,7 +144,7 @@ d.exact_matches  # synthetic rows identical to some real row</code></pre>
 <p>The curve is usually steep at the low end and flat above it, and the useful question is where your data stops improving. Results at low ε carry substantial seed noise, so sweep several seeds before reading much into a single curve.</p>
       </article>
       <footer class="md-footer">
-        <p>Built with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and <a href="https://github.com/mthelm85/MaterialDocs.jl">MaterialDocs.jl</a></p>
+<p>Built with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and <a href="https://github.com/mthelm85/MaterialDocs.jl">MaterialDocs.jl</a>.</p>
       </footer>
     </main>
     <aside class="md-toc">
@@ -157,6 +164,6 @@ d.exact_matches  # synthetic rows identical to some real row</code></pre>
   <script>hljs.highlightAll();</script>
   <script src="../siteinfo.js"></script>
   <script src="../../versions.js"></script>
-  <script src="../assets/materialdocs.js?v=5b928442"></script>
+  <script src="../assets/materialdocs.js?v=6fb28447"></script>
 </body>
 </html>
